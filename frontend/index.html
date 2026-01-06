@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>DeFiGate Dashboard</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <h1>DeFiGate Dashboard</h1>
+
+    <section class="card">
+      <h2>Create Wallet</h2>
+      <input type="text" id="walletUserId" placeholder="User ID" />
+      <input type="email" id="walletEmail" placeholder="Email" />
+      <button onclick="createWallet()">Create Wallet</button>
+      <pre id="walletResult"></pre>
+    </section>
+
+    <section class="card">
+      <h2>Send Tokens</h2>
+      <input type="text" id="sendWalletId" placeholder="Wallet ID" />
+      <input type="text" id="sendToAddress" placeholder="To Address" />
+      <input type="text" id="sendTokenAddress" placeholder="Token Address" />
+      <input type="number" id="sendAmount" placeholder="Amount" />
+      <input type="text" id="sendChain" placeholder="Chain (e.g., BSC)" />
+      <button onclick="sendTokens()">Send</button>
+      <pre id="sendResult"></pre>
+    </section>
+
+    <section class="card">
+      <h2>Create Ramp Payment</h2>
+      <input type="text" id="rampUserId" placeholder="User ID" />
+      <input type="number" id="rampAmount" placeholder="Amount NGN" />
+      <button onclick="createRamp()">Create Ramp</button>
+      <pre id="rampResult"></pre>
+    </section>
+
+    <script src="app.js"></script>
+  </body>
+</html>
