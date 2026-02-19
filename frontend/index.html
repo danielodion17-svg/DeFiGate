@@ -2,38 +2,240 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>DeFiGate Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DeFiGate</title>
     <link rel="stylesheet" href="style.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
   </head>
   <body>
-    <h1>DeFiGate Dashboard</h1>
+    <!-- ===== NAV ===== -->
+    <nav class="navbar">
+      <div class="nav-brand">
+        <span class="logo-icon">&#9670;</span> DeFiGate
+      </div>
+      <div class="nav-links">
+        <a href="#" class="nav-link active" data-view="dashboard">Dashboard</a>
+        <a href="#" class="nav-link" data-view="wallet">Wallet</a>
+        <a href="#" class="nav-link" data-view="ramp">On/Off Ramp</a>
+        <a href="#" class="nav-link" data-view="send">Send</a>
+      </div>
+      <div class="nav-right">
+        <span id="userBadge" class="user-badge hidden"></span>
+        <button id="authBtn" class="btn btn-sm btn-primary" onclick="toggleAuth()">Sign In</button>
+      </div>
+    </nav>
 
-    <section class="card">
-      <h2>Create Wallet</h2>
-      <input type="text" id="walletUserId" placeholder="User ID" />
-      <input type="email" id="walletEmail" placeholder="Email" />
-      <button onclick="createWallet()">Create Wallet</button>
-      <pre id="walletResult"></pre>
-    </section>
+    <!-- ===== AUTH MODAL ===== -->
+    <div id="authModal" class="modal hidden">
+      <div class="modal-backdrop" onclick="closeModal()"></div>
+      <div class="modal-content">
+        <button class="modal-close" onclick="closeModal()">&times;</button>
+        <h2 id="authTitle">Sign In</h2>
+        <form id="authForm" onsubmit="handleAuth(event)">
+          <div class="form-group">
+            <label for="authEmail">Email</label>
+            <input type="email" id="authEmail" required placeholder="you@example.com" />
+          </div>
+          <div class="form-group">
+            <label for="authPassword">Password</label>
+            <input type="password" id="authPassword" required placeholder="Password" />
+          </div>
+          <button type="submit" class="btn btn-primary btn-full" id="authSubmitBtn">Sign In</button>
+        </form>
+        <p class="auth-toggle">
+          <span id="authToggleText">Don't have an account?</span>
+          <a href="#" id="authToggleLink" onclick="switchAuthMode(event)">Sign Up</a>
+        </p>
+      </div>
+    </div>
 
-    <section class="card">
-      <h2>Send Tokens</h2>
-      <input type="text" id="sendWalletId" placeholder="Wallet ID" />
-      <input type="text" id="sendToAddress" placeholder="To Address" />
-      <input type="text" id="sendTokenAddress" placeholder="Token Address" />
-      <input type="number" id="sendAmount" placeholder="Amount" />
-      <input type="text" id="sendChain" placeholder="Chain (e.g., BSC)" />
-      <button onclick="sendTokens()">Send</button>
-      <pre id="sendResult"></pre>
-    </section>
+    <!-- ===== MAIN CONTENT ===== -->
+    <main class="container">
+      <!-- Dashboard View -->
+      <section id="view-dashboard" class="view active">
+        <div class="page-header">
+          <h1>Dashboard</h1>
+          <p class="subtitle">Your DeFi gateway to African markets</p>
+        </div>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">Wallet Status</div>
+            <div class="stat-value" id="dashWalletStatus">No Wallet</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Wallet Address</div>
+            <div class="stat-value stat-mono" id="dashWalletAddr">&mdash;</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Chain</div>
+            <div class="stat-value" id="dashChain">&mdash;</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Account</div>
+            <div class="stat-value" id="dashAccount">Not signed in</div>
+          </div>
+        </div>
 
-    <section class="card">
-      <h2>Create Ramp Payment</h2>
-      <input type="text" id="rampUserId" placeholder="User ID" />
-      <input type="number" id="rampAmount" placeholder="Amount NGN" />
-      <button onclick="createRamp()">Create Ramp</button>
-      <pre id="rampResult"></pre>
-    </section>
+        <div class="quick-actions">
+          <h2>Quick Actions</h2>
+          <div class="actions-grid">
+            <button class="action-card" onclick="navigateTo('wallet')">
+              <span class="action-icon">&#128179;</span>
+              <span class="action-label">Create Wallet</span>
+            </button>
+            <button class="action-card" onclick="navigateTo('ramp')">
+              <span class="action-icon">&#128176;</span>
+              <span class="action-label">Buy Crypto</span>
+            </button>
+            <button class="action-card" onclick="navigateTo('send')">
+              <span class="action-icon">&#128640;</span>
+              <span class="action-label">Send Tokens</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Wallet View -->
+      <section id="view-wallet" class="view">
+        <div class="page-header">
+          <h1>Wallet</h1>
+          <p class="subtitle">Create and manage your embedded wallet via Privy</p>
+        </div>
+        <div class="card">
+          <h3>Create Embedded Wallet</h3>
+          <p class="card-desc">Creates a new wallet linked to your account using Privy's server-side wallet infrastructure.</p>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="walletChain">Chain</label>
+              <select id="walletChain">
+                <option value="ethereum">Ethereum</option>
+                <option value="solana">Solana</option>
+              </select>
+            </div>
+          </div>
+          <button class="btn btn-primary" onclick="createWallet()" id="createWalletBtn">Create Wallet</button>
+          <div id="walletResult" class="result-box hidden"></div>
+        </div>
+
+        <div class="card hidden" id="walletInfoCard">
+          <h3>Your Wallet</h3>
+          <div class="info-grid">
+            <div class="info-item">
+              <span class="info-label">Wallet ID</span>
+              <span class="info-value" id="infoWalletId"></span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">Address</span>
+              <span class="info-value info-mono" id="infoWalletAddr"></span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">Chain</span>
+              <span class="info-value" id="infoWalletChain"></span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- On/Off Ramp View -->
+      <section id="view-ramp" class="view">
+        <div class="page-header">
+          <h1>On/Off Ramp</h1>
+          <p class="subtitle">Convert between fiat (NGN) and crypto via Kotani Pay</p>
+        </div>
+
+        <div class="tabs">
+          <button class="tab active" data-tab="onramp" onclick="switchTab(this)">Buy Crypto (On-Ramp)</button>
+          <button class="tab" data-tab="offramp" onclick="switchTab(this)">Sell Crypto (Off-Ramp)</button>
+        </div>
+
+        <div id="tab-onramp" class="tab-content active">
+          <div class="card">
+            <h3>Deposit NGN &rarr; Crypto</h3>
+            <p class="card-desc">Deposit Nigerian Naira via bank transfer or mobile money and receive crypto in your wallet.</p>
+            <div class="form-group">
+              <label for="onrampAmount">Amount (NGN)</label>
+              <input type="number" id="onrampAmount" placeholder="e.g. 5000" min="100" />
+            </div>
+            <div class="form-group">
+              <label for="onrampChannel">Payment Channel</label>
+              <select id="onrampChannel">
+                <option value="bank_checkout">Bank Transfer</option>
+                <option value="mobile_money">Mobile Money</option>
+              </select>
+            </div>
+            <button class="btn btn-primary" onclick="createOnramp()" id="onrampBtn">Deposit</button>
+            <div id="onrampResult" class="result-box hidden"></div>
+          </div>
+        </div>
+
+        <div id="tab-offramp" class="tab-content">
+          <div class="card">
+            <h3>Withdraw Crypto &rarr; NGN</h3>
+            <p class="card-desc">Convert your crypto to NGN and withdraw to your bank account or mobile money.</p>
+            <div class="form-group">
+              <label for="offrampAmount">Amount (Crypto)</label>
+              <input type="number" id="offrampAmount" placeholder="e.g. 10" step="0.01" min="0.01" />
+            </div>
+            <div class="form-group">
+              <label for="offrampToken">Token</label>
+              <select id="offrampToken">
+                <option value="cUSD">cUSD</option>
+                <option value="USDT">USDT</option>
+                <option value="USDC">USDC</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="offrampPhone">Phone Number</label>
+              <input type="tel" id="offrampPhone" placeholder="+234..." />
+            </div>
+            <button class="btn btn-primary" onclick="createOfframp()" id="offrampBtn">Withdraw</button>
+            <div id="offrampResult" class="result-box hidden"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Send View -->
+      <section id="view-send" class="view">
+        <div class="page-header">
+          <h1>Send Tokens</h1>
+          <p class="subtitle">Transfer tokens to any address on supported chains</p>
+        </div>
+        <div class="card">
+          <div class="form-group">
+            <label for="sendToAddress">Recipient Address</label>
+            <input type="text" id="sendToAddress" placeholder="0x..." />
+          </div>
+          <div class="form-group">
+            <label for="sendTokenAddress">Token Contract Address</label>
+            <input type="text" id="sendTokenAddress" placeholder="0x... (leave empty for native token)" />
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="sendAmount">Amount</label>
+              <input type="number" id="sendAmount" placeholder="0.00" step="0.0001" min="0" />
+            </div>
+            <div class="form-group">
+              <label for="sendChain">Chain</label>
+              <select id="sendChain">
+                <option value="celo">Celo</option>
+                <option value="ethereum">Ethereum</option>
+                <option value="base">Base</option>
+              </select>
+            </div>
+          </div>
+          <button class="btn btn-primary" onclick="sendTokens()" id="sendBtn">Send</button>
+          <div id="sendResult" class="result-box hidden"></div>
+        </div>
+      </section>
+    </main>
+
+    <!-- ===== TOAST ===== -->
+    <div id="toastContainer" class="toast-container"></div>
 
     <script src="app.js"></script>
   </body>
