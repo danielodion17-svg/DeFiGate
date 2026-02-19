@@ -1,4 +1,5 @@
-const API_BASE = "http://localhost:5000"; // backend URL
+// Use current origin so the frontend works in any environment
+const API_BASE = window.location.origin;
 
 async function createWallet() {
   const userId = document.getElementById("walletUserId").value;
