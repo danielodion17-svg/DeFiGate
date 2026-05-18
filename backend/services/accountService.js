@@ -2,15 +2,25 @@ import { supabase } from '../config/supabase.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 
 const DEFAULT_ASSET = 'USDC';
-const AMOUNT_REGEX = /^-?\d+(?:\.\d{1,6})?$/;
+const ASSET_DECIMALS = {
+  USDC: 6,
+  SOL: 9,
+};
 
 function normalizeAsset(asset) {
   return String(asset || DEFAULT_ASSET).trim().toUpperCase();
 }
 
-function normalizeAmount(amount) {
+function getAssetPrecision(asset) {
+  const normalizedAsset = normalizeAsset(asset);
+  return ASSET_DECIMALS[normalizedAsset] ?? 18;
+}
+
+function normalizeAmount(amount, asset = DEFAULT_ASSET) {
   const amountString = String(amount).trim();
-  if (!AMOUNT_REGEX.test(amountString)) {
+  const precision = getAssetPrecision(asset);
+  const amountRegex = new RegExp(`^-?\\d+(?:\\.\\d{1,${precision}})?$`);
+  if (!amountRegex.test(amountString)) {
     throw new Error('INVALID_AMOUNT');
   }
   return amountString;
@@ -115,7 +125,7 @@ async function addLedgerEntry({
     throw new Error('INVALID_LEDGER_ENTRY');
   }
 
-  const normalizedAmount = normalizeAmount(amount);
+  const normalizedAmount = normalizeAmount(amount, asset);
   const normalizedAsset = normalizeAsset(asset);
   const rpcParams = {
     p_user_id: userId,

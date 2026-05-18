@@ -2,7 +2,7 @@ import bcrypt from "bcrypt";
 import crypto from "crypto";
 import pool from "../db.js";
 import { generateToken } from "../middleware/auth.js";
-import { ensureUserWallet, getCanonicalWallet } from "./walletController.js";
+import { getCanonicalWallet } from "./walletController.js";
 import { sendVerificationEmail } from "../services/emailService.js";
 import { respondError, respondSuccess } from "../utils/response.js";
 import Transaction from "../models/Transaction.js";
@@ -15,15 +15,6 @@ function normalizeEmail(email) {
 
 function generateVerificationToken() {
   return crypto.randomBytes(24).toString("hex");
-}
-
-async function getWalletForUser(userId) {
-  const result = await pool.query(
-    `SELECT id, user_id, provider, provider_wallet_id, address, chain, created_at, last_accessed_at, is_primary
-     FROM wallets WHERE user_id = $1 LIMIT 1`,
-    [userId]
-  );
-  return result.rows[0] || null;
 }
 
 export const signup = async (req, res) => {
@@ -65,10 +56,13 @@ const { email, password, name, phone, company } = req.body;
 
     let wallet;
     try {
-      wallet = await ensureUserWallet(user.id, user.email, preferredChain);
+      wallet = await getCanonicalWallet(user.id, preferredChain);
+      if (!wallet) {
+        wallet = { status: "disconnected", error: "Wallet not found" };
+      }
     } catch (err) {
       console.error("DB signup wallet error", err?.message || err);
-      wallet = { status: "disconnected", error: err?.message || "Wallet create failed" };
+      wallet = { status: "disconnected", error: err?.message || "Wallet lookup failed" };
     }
 
     const token = generateToken(user);

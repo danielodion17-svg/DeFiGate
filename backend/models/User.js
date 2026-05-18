@@ -24,10 +24,6 @@ const User = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     },
-    wallet_address: {
-      type: DataTypes.STRING,
-      allowNull: true,
-    },
     phone: {
       type: DataTypes.STRING,
       allowNull: true,
@@ -55,10 +51,6 @@ const User = sequelize.define(
     preferred_chain: {
       type: DataTypes.STRING,
       defaultValue: 'solana',
-    },
-    privy_wallet_id: {
-      type: DataTypes.STRING,
-      allowNull: true,
     },
     is_frozen: {
       type: DataTypes.BOOLEAN,
