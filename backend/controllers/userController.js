@@ -27,23 +27,23 @@ async function getWalletForUser(userId) {
 }
 
 export const signup = async (req, res) => {
-  const { email, password, name, walletAddress, phone, company } = req.body;
-  const normalizedEmail = normalizeEmail(email);
+const { email, password, name, phone, company } = req.body;
+    const normalizedEmail = normalizeEmail(email);
 
-  if (!normalizedEmail || !password || password.length < 6) {
-    return respondError(res, 400, "Email and password (min 6 chars) are required", false);
-  }
+    if (!normalizedEmail || !password || password.length < 6) {
+      return respondError(res, 400, "Email and password (min 6 chars) are required", false);
+    }
 
-  const verificationToken = generateVerificationToken();
-  const preferredChain = "solana";
+    const verificationToken = generateVerificationToken();
+    const preferredChain = "solana";
 
-  try {
-    const hash = await bcrypt.hash(password, 10);
-    const result = await pool.query(
-      `INSERT INTO users (email, password_hash, name, wallet_address, phone, company, is_verified, email_verification_token, kyc_status, preferred_chain, role)
-       VALUES ($1, $2, $3, $4, $5, $6, false, $7, 'pending', $8, 'user')
-       RETURNING id, email, name, wallet_address, phone, company, is_verified, kyc_status, preferred_chain, role`,
-      [normalizedEmail, hash, name || null, walletAddress || null, phone || null, company || null, verificationToken, preferredChain]
+    try {
+      const hash = await bcrypt.hash(password, 10);
+      const result = await pool.query(
+        `INSERT INTO users (email, password_hash, name, phone, company, is_verified, email_verification_token, kyc_status, preferred_chain, role)
+         VALUES ($1, $2, $3, $4, $5, false, $6, 'pending', $7, 'user')
+         RETURNING id, email, name, phone, company, is_verified, kyc_status, preferred_chain, role`,
+        [normalizedEmail, hash, name || null, phone || null, company || null, verificationToken, preferredChain]
     );
 
     const user = result.rows[0];
@@ -77,7 +77,7 @@ export const signup = async (req, res) => {
         id: user.id,
         email: user.email,
         name: user.name,
-        walletAddress: user.wallet_address,
+        walletAddress: wallet?.address || null,
         phone: user.phone,
         company: user.company,
         is_verified: user.is_verified,
@@ -113,7 +113,7 @@ export const signin = async (req, res) => {
 
   try {
     const result = await pool.query(
-      `SELECT id, email, name, wallet_address, phone, company, password_hash, is_verified, kyc_status, preferred_chain, role
+      `SELECT id, email, name, phone, company, password_hash, is_verified, kyc_status, preferred_chain, role
        FROM users WHERE email = $1`,
       [normalizedEmail]
     );
@@ -148,7 +148,7 @@ export const signin = async (req, res) => {
         id: user.id,
         email: user.email,
         name: user.name,
-        walletAddress: user.wallet_address,
+        walletAddress: wallet?.address || null,
         phone: user.phone,
         company: user.company,
         available_balance: available_balance,
@@ -278,7 +278,7 @@ export const updateProfile = async (req, res) => {
     const result = await pool.query(
       `UPDATE users SET name = COALESCE($1, name), phone = COALESCE($2, phone), company = COALESCE($3, company), updated_at = NOW()
        WHERE id = $4
-       RETURNING id, email, name, wallet_address, phone, company`,
+       RETURNING id, email, name, phone, company, preferred_chain`,
       [name, phone, company, user.id]
     );
 
@@ -287,12 +287,24 @@ export const updateProfile = async (req, res) => {
     }
 
     const updatedUser = result.rows[0];
+    let wallet;
+    try {
+      wallet = await getCanonicalWallet(updatedUser.id, updatedUser.preferred_chain || 'solana');
+      if (!wallet) {
+        wallet = { status: 'disconnected', error: 'Wallet not found' };
+      }
+    } catch (err) {
+      console.error('updateProfile wallet error', err?.message || err);
+      wallet = { status: 'disconnected', error: err?.message || 'Wallet lookup failed' };
+    }
+
     return respondSuccess(res, {
       user: {
         id: updatedUser.id,
         email: updatedUser.email,
         name: updatedUser.name,
-        walletAddress: updatedUser.wallet_address,
+        walletAddress: wallet?.address || null,
+        wallet,
         phone: updatedUser.phone,
         company: updatedUser.company,
       },
@@ -461,6 +473,7 @@ export const getMe = async (req, res) => {
           role: fullUser.role || 'user',
           available_balance,
           is_verified: fullUser.is_verified,
+          walletAddress: wallet?.address || null,
           wallet,
         },
       },

@@ -489,7 +489,10 @@ export const getWalletBalances = async (req, res) => {
 export const getWallet = async (req, res) => {
   const { walletId } = req.params;
   try {
-    const r = await axios.get(`${PRIVY_BASE}/v1/wallets/${walletId}`, {
+    const providerWalletId = await resolvePrivyWalletId(walletId);
+    const walletIdentifier = providerWalletId || walletId;
+
+    const r = await axios.get(`${PRIVY_BASE}/v1/wallets/${walletIdentifier}`, {
       headers: privyHeaders(),
     });
     return res.json({ ok: true, data: r.data });
