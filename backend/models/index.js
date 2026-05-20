@@ -5,6 +5,8 @@ import Transaction from "./Transaction.js";
 import Transfer from "./Transfer.js";
 import Wallet from "./Wallet.js";
 import LedgerEntry from "./LedgerEntry.js";
+import AccountLedger from "./AccountLedger.js";
+import AuditLog from "./AuditLog.js";
 
 // ========== ASSOCIATIONS ==========
 
@@ -30,6 +32,11 @@ Account.hasMany(LedgerEntry, { foreignKey: "credit_account_id", as: "credits", o
 LedgerEntry.belongsTo(Account, { foreignKey: "debit_account_id", as: "debitAccount" });
 LedgerEntry.belongsTo(Account, { foreignKey: "credit_account_id", as: "creditAccount" });
 
+Account.hasMany(AccountLedger, { foreignKey: "user_id", onDelete: "CASCADE" });
+AccountLedger.belongsTo(Account, { foreignKey: "user_id" });
+Wallet.hasMany(AccountLedger, { foreignKey: "wallet_id", onDelete: "SET NULL" });
+AccountLedger.belongsTo(Wallet, { foreignKey: "wallet_id" });
+
 // User -> Transfer (One-to-Many) - Sender
 User.hasMany(Transfer, { 
   foreignKey: "sender_id", 
@@ -52,4 +59,4 @@ Transfer.belongsTo(User, {
   as: "receiver" 
 });
 
-export { sequelize, User, Account, Transaction, Transfer, Wallet, LedgerEntry };
+export { sequelize, User, Account, Transaction, Transfer, Wallet, LedgerEntry, AccountLedger, AuditLog };

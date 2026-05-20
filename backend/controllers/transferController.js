@@ -2,13 +2,14 @@ import pool from "../db.js";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
 import dotenv from "dotenv";
+import { PublicKey } from '@solana/web3.js';
 import sequelize from "../config/database.js";
-import Balance from "../models/Balance.js";
-import Account from "../models/Account.js";
 import Transaction from "../models/Transaction.js";
 import User from "../models/User.js";
 import { respondError, respondSuccess } from "../utils/response.js";
-import { transferFunds } from "../services/transferService.js";
+import { processUSDCWithdrawal, getWithdrawalStatus } from "../services/withdrawalService.js";
+import { logAuditEvent, AUDIT_ACTIONS } from '../services/auditService.js';
+import { getDerivedBalance, debitAccount, creditAccount } from '../services/accountService.js';
 dotenv.config();
 
 const inMemoryTransfers = new Map();
@@ -116,6 +117,20 @@ export const initiateTransfer = async (req, res) => {
     // Store PIN temporarily (should use Redis in production)
     inMemoryPINs.set(`${senderId}:${transfer.id}`, pin);
 
+    // Log audit event
+    await logAuditEvent(AUDIT_ACTIONS.TRANSFER_INITIATED, {
+      user_id: senderId,
+      amount: transfer.amount,
+      asset: transfer.token_symbol,
+      metadata: {
+        recipient_id: recipientId,
+        transfer_id: transfer.id,
+        chain: transfer.chain
+      },
+      ip_address: req.ip,
+      user_agent: req.get('User-Agent')
+    });
+
     res.json({
       ok: true,
       data: {
@@ -190,61 +205,43 @@ export const confirmTransfer = async (req, res) => {
       return res.status(401).json({ ok: false, error: "Invalid password" });
     }
 
-    // Transfer settlement: adjust balances and complete transfer atomically
-    await pool.query("BEGIN");
-
-    const senderBalanceResult = await pool.query(
-      `SELECT available_balance FROM balances WHERE user_id = $1 FOR UPDATE`,
-      [senderId]
-    );
-
-    if (senderBalanceResult.rows.length === 0) {
-      await pool.query("ROLLBACK");
-      return res.status(404).json({ ok: false, error: "Sender balance not found" });
-    }
-
-    const senderBalance = Number(senderBalanceResult.rows[0].available_balance || 0);
     const transferAmount = Number(transfer.amount || 0);
-
     if (Number.isNaN(transferAmount) || transferAmount <= 0) {
-      await pool.query("ROLLBACK");
       return res.status(400).json({ ok: false, error: "Invalid transfer amount" });
     }
 
+    const senderBalance = await getDerivedBalance(senderId, transfer.token_symbol);
     if (senderBalance < transferAmount) {
-      await pool.query("ROLLBACK");
       return res.status(400).json({ ok: false, error: "Insufficient funds" });
     }
 
-    const recipientBalanceResult = await pool.query(
-      `SELECT available_balance FROM balances WHERE user_id = $1 FOR UPDATE`,
-      [transfer.recipient_id]
-    );
+    const completedTransfer = await sequelize.transaction(async (tx) => {
+      await debitAccount(senderId, transferAmount, {
+        asset: transfer.token_symbol,
+        txHash: `transfer_${transfer.id}`,
+        metadata: { transferId: transfer.id, type: 'transfer_debit' },
+        transaction: tx,
+      });
 
-    if (recipientBalanceResult.rows.length === 0) {
-      await pool.query("ROLLBACK");
-      return res.status(404).json({ ok: false, error: "Recipient balance not found" });
-    }
+      await creditAccount(transfer.recipient_id, transferAmount, {
+        asset: transfer.token_symbol,
+        txHash: `transfer_${transfer.id}`,
+        metadata: { transferId: transfer.id, type: 'transfer_credit' },
+        transaction: tx,
+      });
 
-    await pool.query(
-      `UPDATE balances SET available_balance = available_balance - $1 WHERE user_id = $2`,
-      [transferAmount, senderId]
-    );
+      const [_, updatedRows] = await Transaction.update(
+        { status: 'completed', completed_at: new Date() },
+        { where: { id: transferId }, transaction: tx, returning: true }
+      );
 
-    await pool.query(
-      `UPDATE balances SET available_balance = available_balance + $1 WHERE user_id = $2`,
-      [transferAmount, transfer.recipient_id]
-    );
+      const updatedTransfer = Array.isArray(updatedRows) ? updatedRows[0] : null;
+      if (!updatedTransfer) {
+        throw new Error('Failed to update transfer status');
+      }
 
-    const updatedResult = await pool.query(
-      `UPDATE transfers SET status = $1, completed_at = NOW() WHERE id = $2
-       RETURNING id, sender_id, recipient_id, amount, token_symbol, chain, status, completed_at`,
-      ["completed", transferId]
-    );
-
-    await pool.query("COMMIT");
-
-    const completedTransfer = updatedResult.rows[0];
+      return updatedTransfer;
+    });
 
     // Clear PIN
     inMemoryPINs.delete(`${senderId}:${transferId}`);
@@ -432,94 +429,84 @@ function simulateSolanaWithdrawal(toAddress, amount) {
 
 export const withdraw = async (req, res) => {
   const userId = req.user?.id;
-  const { amount, toAddress, chain = "solana" } = req.body;
+  const { amount, toAddress, walletId } = req.body;
+  const idempotencyKey = req.headers["idempotency-key"] || req.headers["Idempotency-Key"];
 
   if (!userId) {
     return res.status(401).json({ ok: false, error: "Not authenticated" });
   }
 
-  if (chain !== "solana") {
-    return res.status(400).json({ ok: false, error: "Only Solana withdrawals are supported" });
+  if (!idempotencyKey) {
+    return res.status(400).json({ ok: false, error: "Idempotency-Key header is required" });
+  }
+
+  if (!amount || !toAddress || !walletId) {
+    return res.status(400).json({
+      ok: false,
+      error: "Missing required fields: amount, toAddress, walletId"
+    });
   }
 
   const withdrawAmount = parseFloat(amount);
-  if (!withdrawAmount || withdrawAmount <= 0 || !toAddress) {
-    return res.status(400).json({ ok: false, error: "Valid amount and Solana address required" });
+  if (!withdrawAmount || withdrawAmount <= 0) {
+    return res.status(400).json({ ok: false, error: "Valid amount required" });
+  }
+
+  // Basic Solana address validation
+  try {
+    new PublicKey(toAddress);
+  } catch (error) {
+    return res.status(400).json({ ok: false, error: "Invalid Solana address" });
   }
 
   try {
-    await pool.query('BEGIN');
-
-    const balanceResult = await pool.query(
-      `SELECT available_balance FROM balances WHERE user_id = $1 FOR UPDATE`,
-      [userId]
-    );
-    if (balanceResult.rows.length === 0 || Number(balanceResult.rows[0].available_balance) < withdrawAmount) {
-      await pool.query('ROLLBACK');
-      return res.status(400).json({ ok: false, error: "Insufficient balance" });
-    }
-
-    const transactionResult = await pool.query(
-      `INSERT INTO transactions (user_id, type, amount, asset, reference, status)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id`,
-      [
-        userId,
-        'withdrawal',
-        withdrawAmount,
-        'USDC',
-        `withdrawal to ${toAddress}`,
-        'pending'
-      ]
-    );
-
-    await pool.query(
-      `UPDATE balances SET available_balance = available_balance - $1 WHERE user_id = $2`,
-      [withdrawAmount, userId]
-    );
-
-    await pool.query('COMMIT');
-
-    const result = await simulateSolanaWithdrawal(toAddress, withdrawAmount);
-
-    if (!result.success) {
-      // Refund
-      await pool.query('BEGIN');
-      await pool.query(
-        `UPDATE balances SET available_balance = available_balance + $1 WHERE user_id = $2`,
-        [withdrawAmount, userId]
-      );
-      await pool.query(
-        `UPDATE transactions SET status = $1, tx_hash = $2 WHERE id = $3`,
-        ['failed', result.txHash || null, transactionResult.rows[0].id]
-      );
-      await pool.query('COMMIT');
-
-      return res.status(500).json({ ok: false, error: "Withdrawal broadcast failed", details: result.message || "Transaction failed" });
-    }
-
-    await pool.query(
-      `UPDATE transactions SET status = $1, tx_hash = $2 WHERE id = $3`,
-      ['completed', result.txHash, transactionResult.rows[0].id]
+    const result = await processUSDCWithdrawal(
+      userId,
+      walletId,
+      toAddress,
+      withdrawAmount,
+      idempotencyKey
     );
 
     res.json({
       ok: true,
       data: {
-        transactionId: transactionResult.rows[0].id,
-        status: 'completed',
-        tx_hash: result.txHash,
-        message: "Withdrawal completed successfully",
+        transactionId: result.transactionId,
+        status: result.status,
+        txHash: result.txHash,
+        message: result.message,
       },
     });
-  } catch (err) {
-    await pool.query('ROLLBACK');
-    console.error("withdraw error", err);
-    res.status(500).json({ ok: false, error: "Withdrawal failed" });
+  } catch (error) {
+    console.error("withdraw error", error);
+    res.status(500).json({
+      ok: false,
+      error: error.message || "Withdrawal failed"
+    });
   }
 };
 
-// Get pending transfers for a recipient
+// Get withdrawal status
+export const getWithdrawalStatusController = async (req, res) => {
+  const userId = req.user?.id;
+  const { transactionId } = req.params;
+
+  if (!userId) {
+    return res.status(401).json({ ok: false, error: "Not authenticated" });
+  }
+
+  if (!transactionId) {
+    return res.status(400).json({ ok: false, error: "Transaction ID required" });
+  }
+
+  try {
+    const status = await getWithdrawalStatus(transactionId, userId);
+    res.json({ ok: true, data: status });
+  } catch (error) {
+    console.error("getWithdrawalStatus error", error);
+    res.status(404).json({ ok: false, error: error.message });
+  }
+};
 export const getPendingTransfers = async (req, res) => {
   const userId = req.user?.id;
 

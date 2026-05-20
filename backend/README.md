@@ -32,14 +32,33 @@ This scaffold contains a minimal Node.js + Express backend and a Netlify-ready f
    npm start
    ```
 
-## Remote fallback
-If local Postgres is unavailable, you can start the backend against a remote database by overriding `DATABASE_URL` when launching the server:
+For local Supabase-backed development, set `USE_SUPABASE_CLIENT=true` and run:
 ```bash
-DATABASE_URL="postgresql://postgres.lkceqrnarofwigtoiapv:wqVp6EzMPIjbUOEU@aws-0-eu-west-1.pooler.supabase.com:5432/postgres" npm start
+USE_SUPABASE_CLIENT=true npm run dev
+```
+
+Production checklist
+- Ensure you set the following env vars in your deployment environment (Render/Heroku/VPS):
+   - `SUPABASE_DATABASE_URL` (or `DATABASE_URL`)
+   - `SUPABASE_URL`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+   - `JWT_SECRET`, `PRIVY_APP_ID`, `PRIVY_APP_SECRET`, `KOTANI_API_KEY` as needed
+- Use `npm run start:prod` to start the server in production. A `Procfile` is provided for platforms that use it.
+- For safety, migrations run only when `AUTO_RUN_MIGRATIONS=true`.
+
+## Remote fallback
+If local Postgres is unavailable, you can start the backend against a remote database by overriding `DATABASE_URL` or `SUPABASE_DATABASE_URL` when launching the server:
+```bash
+SUPABASE_DATABASE_URL="postgresql://postgres.lkceqrnarofwigtoiapv:wqVp6EzMPIjbUOEU@aws-0-eu-west-1.pooler.supabase.com:5432/postgres" npm start
+```
+For production, use the new `start:prod` script:
+```bash
+SUPABASE_DATABASE_URL="postgresql://..." npm run start:prod
 ```
 
 ## Notes
-- `backend/config/database.js` now supports either `DATABASE_URL` or `LOCAL_DATABASE_URL`.
+- `backend/config/database.js` now supports `SUPABASE_DATABASE_URL`, `DATABASE_URL`, or `LOCAL_DATABASE_URL`.
+- `backend/config/supabase.js` also supports backend server-side use of `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`.
 - Local DB connections to `localhost` will use no SSL, while remote DB URLs will use SSL with `rejectUnauthorized: false`.
 - Keep credentials out of source control and do not commit your `.env` file.
 

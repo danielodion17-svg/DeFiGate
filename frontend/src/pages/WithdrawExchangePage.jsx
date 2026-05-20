@@ -1,17 +1,18 @@
 import React, { useState } from 'react';
 import { FormStep, ConfirmationModal, ProcessingScreen, SuccessScreen } from '../components';
+import { apiUrl } from '../api';
 
-const WithdrawExchangePage = ({ currentUser, sendTokens, navigateTo }) => {
+const WithdrawExchangePage = ({ currentUser, navigateTo }) => {
   const [currentStep, setCurrentStep] = useState('form');
   const wallet = currentUser?.wallet;
   const [formData, setFormData] = useState({
     recipientAddress: '',
     amount: '',
-    network: wallet?.chain || 'ethereum',
-    tokenAddress: '' // optional, for ERC-20 tokens
+    tokenAddress: '' // optional, for SPL token mint address
   });
   const [transactionData, setTransactionData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [transactionId, setTransactionId] = useState(null);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -38,18 +39,36 @@ const WithdrawExchangePage = ({ currentUser, sendTokens, navigateTo }) => {
     setCurrentStep('processing');
 
     try {
-      const data = await sendTokens(
-        formData.recipientAddress,
-        formData.tokenAddress || undefined,
-        formData.amount
-      );
-      if (data) {
-        setTransactionData(data);
-        setCurrentStep('success');
-      } else {
-        setCurrentStep('form');
+      // Generate idempotency key
+      const idempotencyKey = `withdraw_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+      const token = localStorage.getItem('authToken');
+      const response = await fetch(apiUrl('/transfer/withdraw'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify({
+          amount: formData.amount,
+          toAddress: formData.recipientAddress,
+          walletId: wallet.id,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!data.ok) {
+        throw new Error(data.error || 'Withdrawal failed');
       }
+
+      setTransactionId(data.data.transactionId);
+      setTransactionData(data.data);
+      setCurrentStep('success');
     } catch (error) {
+      console.error('Withdrawal error:', error);
+      alert(`Withdrawal failed: ${error.message}`);
       setCurrentStep('form');
     } finally {
       setLoading(false);
@@ -61,7 +80,6 @@ const WithdrawExchangePage = ({ currentUser, sendTokens, navigateTo }) => {
     setFormData({
       recipientAddress: '',
       amount: '',
-      network: wallet?.chain || 'ethereum',
       tokenAddress: ''
     });
     setTransactionData(null);
@@ -91,7 +109,7 @@ const WithdrawExchangePage = ({ currentUser, sendTokens, navigateTo }) => {
 
         <FormStep
           title="Enter Withdrawal Details"
-          subtitle="Send crypto to any external address"
+          subtitle="Send SOL to any external Solana wallet or exchange address"
           onNext={handleFormSubmit}
           nextLabel="Continue"
           canProceed={formData.recipientAddress && formData.amount}
@@ -104,7 +122,7 @@ const WithdrawExchangePage = ({ currentUser, sendTokens, navigateTo }) => {
               name="recipientAddress"
               value={formData.recipientAddress}
               onChange={handleInputChange}
-              placeholder="0x..."
+              placeholder="Enter Solana wallet address"
               required
             />
           </div>
@@ -125,30 +143,22 @@ const WithdrawExchangePage = ({ currentUser, sendTokens, navigateTo }) => {
           </div>
 
           <div className="form-group">
-            <label htmlFor="network">Network</label>
-            <select
-              id="network"
-              name="network"
-              value={formData.network}
-              onChange={handleInputChange}
-            >
-              <option value="ethereum">Ethereum</option>
-              <option value="polygon">Polygon</option>
-              <option value="bsc">BSC</option>
-            </select>
+            <label>Network</label>
+            <div className="info-value">{wallet.chain?.toUpperCase() || 'SOLANA'}</div>
           </div>
 
           <div className="form-group">
-            <label htmlFor="tokenAddress">Token Contract (Optional)</label>
-            <input
-              type="text"
+            <label htmlFor="tokenAddress">Token</label>
+            <select
               id="tokenAddress"
               name="tokenAddress"
               value={formData.tokenAddress}
               onChange={handleInputChange}
-              placeholder="Leave empty for ETH"
-            />
-            <small className="form-hint">Leave empty to send native token (ETH)</small>
+            >
+              <option value="">SOL (Native)</option>
+              <option value="USDC">USDC (SPL Token)</option>
+            </select>
+            <small className="form-hint">Select SOL for native token or USDC for stablecoin</small>
           </div>
 
           <div className="withdrawal-warning">
@@ -172,8 +182,8 @@ const WithdrawExchangePage = ({ currentUser, sendTokens, navigateTo }) => {
         details={[
           { label: 'Recipient', value: `${formData.recipientAddress.substring(0, 12)}...${formData.recipientAddress.substring(-8)}` },
           { label: 'Amount', value: formData.amount },
-          { label: 'Network', value: formData.network.toUpperCase() },
-          { label: 'Token', value: formData.tokenAddress ? 'ERC-20 Token' : 'ETH' }
+          { label: 'Network', value: wallet.chain?.toUpperCase() || 'SOLANA' },
+          { label: 'Token', value: formData.tokenAddress === 'USDC' ? 'USDC' : 'SOL' }
         ]}
         onConfirm={handleConfirm}
         onCancel={() => setCurrentStep('form')}
@@ -196,12 +206,13 @@ const WithdrawExchangePage = ({ currentUser, sendTokens, navigateTo }) => {
   if (currentStep === 'success') {
     return (
       <SuccessScreen
-        title="Withdrawal Successful"
-        message="Your crypto has been sent successfully"
+        title="Withdrawal Initiated"
+        message="Your withdrawal has been broadcasted and is being processed"
         details={[
-          { label: 'Amount', value: formData.amount },
-          { label: 'Network', value: formData.network.toUpperCase() },
-          { label: 'Status', value: 'Completed' }
+          { label: 'Amount', value: `${formData.amount} USDC` },
+          { label: 'Recipient', value: `${formData.recipientAddress.substring(0, 12)}...${formData.recipientAddress.substring(-8)}` },
+          { label: 'Status', value: transactionData?.status || 'Processing' },
+          { label: 'Transaction ID', value: transactionId || 'N/A' }
         ]}
         transactionId={transactionData?.txHash}
         onDone={() => navigateTo('dashboard')}

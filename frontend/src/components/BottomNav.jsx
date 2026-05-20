@@ -1,6 +1,6 @@
 import React from 'react';
 
-const BottomNav = ({ currentView, navigateTo }) => {
+const BottomNav = ({ currentView, navigateTo, user }) => {
   const navItems = [
     {
       id: 'dashboard',

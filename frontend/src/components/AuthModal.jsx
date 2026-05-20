@@ -8,7 +8,6 @@ const AuthModal = ({ onAuthenticated, onShowToast }) => {
     email: '',
     password: '',
     name: '',
-    walletAddress: '',
   });
 
   const handleInputChange = (e) => {
@@ -49,12 +48,12 @@ const AuthModal = ({ onAuthenticated, onShowToast }) => {
         return;
       }
 
-      const { user, token, wallet } = response_data.data;
+      const { user, token } = response_data.data;
       onAuthenticated({
         id: user.id,
         name: user.email,
         email: user.email,
-        walletAddress: wallet?.address,
+        walletAddress: user.walletAddress || null,
         token: token,
       });
       setLoading(false);
@@ -78,6 +77,7 @@ const AuthModal = ({ onAuthenticated, onShowToast }) => {
         body: JSON.stringify({
           email: formData.email,
           password: formData.password,
+          name: formData.name,
         }),
       });
 
@@ -95,12 +95,12 @@ const AuthModal = ({ onAuthenticated, onShowToast }) => {
         return;
       }
 
-      const { user, token, wallet } = response_data.data;
+      const { user, token } = response_data.data;
       onAuthenticated({
         id: user.id,
         name: user.email,
         email: user.email,
-        walletAddress: wallet?.address,
+        walletAddress: user.walletAddress || null,
         token: token,
       });
       setLoading(false);
@@ -149,22 +149,6 @@ const AuthModal = ({ onAuthenticated, onShowToast }) => {
             />
           </div>
 
-          {isSignUp && (
-            <div className="form-group">
-              <label htmlFor="walletAddress">Wallet Address</label>
-              <input
-                id="walletAddress"
-                type="text"
-                name="walletAddress"
-                value={formData.walletAddress}
-                onChange={handleInputChange}
-                placeholder="0x..."
-                autoComplete="off"
-                required
-              />
-            </div>
-          )}
-
           <div className="form-group">
             <label htmlFor="password">Password</label>
             <input
@@ -199,7 +183,6 @@ const AuthModal = ({ onAuthenticated, onShowToast }) => {
                 email: '',
                 password: '',
                 name: '',
-                walletAddress: '',
               });
             }}
           >

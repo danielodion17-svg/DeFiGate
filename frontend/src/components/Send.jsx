@@ -23,11 +23,14 @@ function Send({ currentUser, sendTokens }) {
         <form onSubmit={handleSend}>
           <div className="form-group">
             <label htmlFor="sendToAddress">Recipient Address</label>
-            <input type="text" id="sendToAddress" name="toAddress" placeholder="0x..." required />
+            <input type="text" id="sendToAddress" name="toAddress" placeholder="Enter Solana wallet address" required />
           </div>
           <div className="form-group">
-            <label htmlFor="sendTokenAddress">Token Contract Address</label>
-            <input type="text" id="sendTokenAddress" name="tokenAddress" placeholder="0x... (leave empty for native token)" />
+            <label htmlFor="sendTokenAddress">Token</label>
+            <select id="sendTokenAddress" name="tokenAddress">
+              <option value="">SOL (Native)</option>
+              <option value="USDC">USDC (SPL Token)</option>
+            </select>
           </div>
           <div className="form-row">
             <div className="form-group">
@@ -35,8 +38,8 @@ function Send({ currentUser, sendTokens }) {
               <input type="number" id="sendAmount" name="amount" placeholder="0.00" step="0.0001" min="0" autoComplete="off" required />
             </div>
             <div className="form-group">
-              <label>Chain</label>
-              <div className="info-value">{wallet ? wallet.chain : "No wallet"}</div>
+              <label>Network</label>
+              <div className="info-value">{wallet ? wallet.chain?.toUpperCase() : "No wallet"}</div>
             </div>
           </div>
           <button type="submit" className="btn btn-primary" disabled={!currentUser || !wallet?.address}>Send</button>

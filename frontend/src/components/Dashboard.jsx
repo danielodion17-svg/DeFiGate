@@ -62,7 +62,7 @@ function Dashboard({ currentUser, navigateTo }) {
             <ul className="modal-options">
               <li><button onClick={() => { navigateTo('ramp'); setShowDepositModal(false); }}>From Bank (on-ramp)</button></li>
               <li><button onClick={() => { navigateTo('ramp'); setShowDepositModal(false); }}>From Exchange</button></li>
-              <li><button onClick={() => { navigateTo('transfer'); setShowDepositModal(false); }}>From Wallet</button></li>
+              <li><button onClick={() => { navigateTo('deposit-exchange'); setShowDepositModal(false); }}>From Wallet</button></li>
             </ul>
           </div>
         </div>
@@ -88,7 +88,7 @@ function Dashboard({ currentUser, navigateTo }) {
             <ul className="modal-options">
               <li><button onClick={() => { navigateTo('ramp'); setShowWithdrawModal(false); }}>To Bank (off-ramp)</button></li>
               <li><button onClick={() => { navigateTo('ramp'); setShowWithdrawModal(false); }}>To Exchange</button></li>
-              <li><button onClick={() => { navigateTo('transfer'); setShowWithdrawModal(false); }}>To Wallet</button></li>
+              <li><button onClick={() => { navigateTo('withdraw-exchange'); setShowWithdrawModal(false); }}>To Wallet</button></li>
             </ul>
           </div>
         </div>

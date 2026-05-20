@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS users (
     kyc_status VARCHAR(255) DEFAULT 'pending',
     preferred_chain VARCHAR(255) DEFAULT 'solana',
     privy_wallet_id VARCHAR(255),
+    is_frozen BOOLEAN NOT NULL DEFAULT false,
+    freeze_reason TEXT,
     status VARCHAR(255) DEFAULT 'active',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -57,8 +59,16 @@ CREATE TABLE IF NOT EXISTS transactions (
     type VARCHAR(255) NOT NULL CHECK (type IN ('deposit', 'transfer', 'withdrawal')),
     amount DECIMAL(20, 6) NOT NULL,
     asset VARCHAR(50) DEFAULT 'USDC',
-    status VARCHAR(255) DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed')),
+    status VARCHAR(255) DEFAULT 'pending' CHECK (status IN ('pending', 'pending_review', 'approved', 'broadcasting', 'broadcasted', 'confirmed', 'completed', 'failed', 'rejected')),
     tx_hash VARCHAR(255),
+    recipient_address TEXT,
+    wallet_id UUID REFERENCES wallets(id),
+    idempotency_key TEXT,
+    broadcasted_at TIMESTAMP WITH TIME ZONE,
+    confirmed_at TIMESTAMP WITH TIME ZONE,
+    failed_at TIMESTAMP WITH TIME ZONE,
+    failure_reason TEXT,
+    network_fee DECIMAL(20, 6) DEFAULT 0,
     reference VARCHAR(255),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     CONSTRAINT unique_transaction_hash UNIQUE (tx_hash)
@@ -73,6 +83,31 @@ CREATE TABLE IF NOT EXISTS ledger_entries (
     amount DECIMAL(20, 6) NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Audit logs table
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    action VARCHAR(100) NOT NULL,
+    user_id UUID REFERENCES users(id),
+    wallet_id UUID REFERENCES wallets(id),
+    transaction_id UUID REFERENCES transactions(id),
+    tx_hash VARCHAR(200),
+    amount DECIMAL(36, 18),
+    asset VARCHAR(20),
+    metadata JSONB,
+    request_id VARCHAR(100),
+    before_state JSONB,
+    after_state JSONB,
+    severity VARCHAR(20) DEFAULT 'info',
+    ip_address INET,
+    user_agent TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_tx_hash ON audit_logs(tx_hash);
 
 -- Transfers table
 CREATE TABLE IF NOT EXISTS transfers (
@@ -93,5 +128,12 @@ CREATE INDEX IF NOT EXISTS idx_transfers_sender_id ON transfers(sender_id);
 CREATE INDEX IF NOT EXISTS idx_transfers_receiver_id ON transfers(receiver_id);
 
 -- Add constraints to prevent self-transfers
-ALTER TABLE transfers ADD CONSTRAINT check_sender_receiver_different
-    CHECK (sender_id != receiver_id);
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints
+                   WHERE constraint_name = 'check_sender_receiver_different'
+                   AND table_name = 'transfers') THEN
+        ALTER TABLE transfers ADD CONSTRAINT check_sender_receiver_different
+            CHECK (sender_id != receiver_id);
+    END IF;
+END $$;

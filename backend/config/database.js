@@ -3,9 +3,9 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const databaseUrl = process.env.DATABASE_URL || process.env.LOCAL_DATABASE_URL;
+const databaseUrl = process.env.SUPABASE_DATABASE_URL || process.env.DATABASE_URL || process.env.LOCAL_DATABASE_URL;
 if (!databaseUrl) {
-  throw new Error("DATABASE_URL or LOCAL_DATABASE_URL must be defined in environment variables.");
+  throw new Error("SUPABASE_DATABASE_URL, DATABASE_URL, or LOCAL_DATABASE_URL must be defined in environment variables.");
 }
 
 const useSsl = !databaseUrl.includes("localhost") && !databaseUrl.includes("127.0.0.1");

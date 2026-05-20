@@ -7,6 +7,7 @@ import { apiUrl } from './api';
 import TransferPage from './pages/TransferPage';
 import RampPage from './pages/RampPage';
 import WalletPage from './pages/WalletPage';
+
 import AuthModal from './components/AuthModal';
 import Toast from './components/Toast';
 
@@ -185,8 +186,9 @@ function App() {
 
       {user && (
         <BottomNav
-          currentPage={currentPage}
-          onPageChange={setCurrentPage}
+          currentView={currentPage}
+          navigateTo={setCurrentPage}
+          user={user}
         />
       )}
 

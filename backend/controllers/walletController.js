@@ -1,6 +1,29 @@
 import axios from "axios";
 import dotenv from "dotenv";
-import pool from "../db.js";
+import { supabase } from "../config/supabase.js";
+import {
+  Connection,
+  PublicKey,
+  Transaction,
+  SystemProgram,
+  LAMPORTS_PER_SOL,
+} from "@solana/web3.js";
+import { logAuditEvent, AUDIT_ACTIONS } from "../services/auditService.js";
+import { getAppLedgerBalance } from "../services/reconciliationService.js";
+import { syncWalletBalances } from "../services/balanceSyncService.js";
+import {
+  getCanonicalWallet,
+  getCanonicalWalletByWalletId,
+  getAllCanonicalWallets,
+} from "../services/walletService.js";
+import {
+  getAssociatedTokenAddress,
+  createAssociatedTokenAccountInstruction,
+  getAccount,
+  transferChecked,
+  TOKEN_PROGRAM_ID,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
 dotenv.config();
 
 const PRIVY_APP_ID = process.env.PRIVY_APP_ID;
@@ -10,6 +33,11 @@ const PRIVY_BASE = "https://api.privy.io";
 const inMemoryWallets = new Map();
 
 const isPrivyEnabled = Boolean(PRIVY_APP_ID && PRIVY_APP_SECRET);
+
+// Solana constants
+const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
+const USDC_MINT = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+const USDC_DECIMALS = 6;
 
 // Privy uses Basic Auth: base64(appId:appSecret)
 function privyHeaders() {
@@ -39,36 +67,56 @@ async function createPrivyWallet(chainType = "solana") {
   return r.data;
 }
 
+async function getWalletByUserId(userId) {
+  return getCanonicalWallet(userId, "solana");
+}
+
 async function getWalletByUserIdAndChain(userId, chainType) {
-  const result = await pool.query(
-    `SELECT id, user_id, provider, provider_wallet_id, address, chain, created_at
-     FROM wallets WHERE user_id = $1 AND chain = $2 LIMIT 1`,
-    [userId, chainType]
-  );
-  return result.rows[0] || null;
+  return getCanonicalWallet(userId, chainType);
 }
 
 async function saveWallet(userId, privyWallet, chainType = "solana") {
+  const existing = await getCanonicalWallet(userId, chainType);
+  if (existing) {
+    return existing;
+  }
+
   const providerWalletId = privyWallet.id || null;
   const address =
     (privyWallet.accounts && privyWallet.accounts[0]?.address) ||
     privyWallet.address ||
     null;
 
-  const insert = await pool.query(
-    `INSERT INTO wallets (user_id, provider, provider_wallet_id, address, chain)
-     VALUES ($1, $2, $3, $4, $5)
-     RETURNING id, user_id, provider, provider_wallet_id, address, chain, created_at`,
-    [userId, "privy", providerWalletId, address, chainType]
-  );
+  try {
+    const { data, error } = await supabase
+      .from('wallets')
+      .insert([
+        {
+          user_id: userId,
+          provider: 'privy',
+          provider_wallet_id: providerWalletId,
+          address,
+          chain: chainType,
+          encrypted_private_key: null,
+          is_primary: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ])
+      .select('*');
 
-  // update user record for easier query
-  await pool.query(
-    `UPDATE users SET privy_wallet_id = $1, updated_at = NOW() WHERE id = $2`,
-    [providerWalletId, userId]
-  );
-
-  return insert.rows[0];
+    if (error) {
+      console.error('saveWallet error', error.message || error);
+      return await getCanonicalWallet(userId, chainType);
+    }
+    if (data && data[0]) {
+      return data[0];
+    }
+    return await getCanonicalWallet(userId, chainType);
+  } catch (error) {
+    console.error("saveWallet error", error?.message || error);
+    return await getCanonicalWallet(userId, chainType);
+  }
 }
 
 export async function ensureUserWallet(userId, email, chainType = "solana") {
@@ -85,28 +133,39 @@ export async function ensureUserWallet(userId, email, chainType = "solana") {
   // Try DB first if configured
   if (process.env.DATABASE_URL) {
     try {
-      const existing = await getWalletByUserIdAndChain(userId, chainType);
+      const existing = await getWalletByUserId(userId);
       if (existing) {
-        return { ...existing, status: "connected" };
-      }
+        await supabase
+          .from('wallets')
+          .update({ last_accessed_at: new Date().toISOString() })
+          .eq('id', existing.id);
 
-      if (!isPrivyEnabled) {
-        const wallet = {
-          id: key,
+        await logAuditEvent(AUDIT_ACTIONS.WALLET_REUSED, {
           user_id: userId,
-          provider: "local",
-          provider_wallet_id: null,
-          address: null,
-          chain: chainType,
-          status: "disconnected",
-          created_at: new Date().toISOString(),
-        };
-        return wallet;
+          wallet_id: existing.id,
+          asset: chainType,
+          metadata: {
+            provider: existing.provider,
+            provider_wallet_id: existing.provider_wallet_id,
+            wallet_address: existing.address,
+          },
+          request_id: `wallet_access_${Date.now()}`,
+        });
+
+        return { ...existing, status: "connected", last_accessed_at: new Date().toISOString() };
       }
 
-      const privyWallet = await createPrivyWallet(chainType);
-      const wallet = await saveWallet(userId, privyWallet, chainType);
-      return { ...wallet, status: "connected", metadata: privyWallet };
+      // Do not auto-create wallets here. Only existing canonical wallets are reused.
+      return {
+        id: key,
+        user_id: userId,
+        provider: "none",
+        provider_wallet_id: null,
+        address: null,
+        chain: chainType,
+        status: "disconnected",
+        created_at: new Date().toISOString(),
+      };
     } catch (err) {
       console.error("DB wallet error, falling back to in-memory", err?.message || err);
     }
@@ -117,50 +176,16 @@ export async function ensureUserWallet(userId, email, chainType = "solana") {
     return inMemoryWallets.get(key);
   }
 
-  if (!isPrivyEnabled) {
-    const wallet = {
-      id: key,
-      address: `sol_${userId.substring(0, 8).toUpperCase()}`,
-      provider: "local",
-      provider_wallet_id: null,
-      chain: chainType,
-      status: "disconnected",
-      created_at: new Date().toISOString(),
-    };
-    inMemoryWallets.set(key, wallet);
-    return wallet;
-  }
-
-  // For Privy with different chains, we create a new Privy wallet
-  try {
-    const privyWallet = await createPrivyWallet(chainType);
-    const wallet = {
-      id: `${privyWallet.id}_${chainType}`,
-      provider: "privy",
-      provider_wallet_id: privyWallet.id,
-      address: privyWallet.accounts?.[0]?.address || privyWallet.address || null,
-      chain: chainType,
-      status: "connected",
-      created_at: new Date().toISOString(),
-      metadata: privyWallet,
-    };
-    inMemoryWallets.set(key, wallet);
-    return wallet;
-  } catch (err) {
-    console.error("ensureUserWallet privy error", err?.response?.data || err?.message || err);
-    const wallet = {
-      id: key,
-      address: `sol_${userId.substring(0, 8).toUpperCase()}`,
-      provider: "local",
-      provider_wallet_id: null,
-      chain: chainType,
-      status: "disconnected",
-      created_at: new Date().toISOString(),
-      error: err?.response?.data || err?.message,
-    };
-    inMemoryWallets.set(key, wallet);
-    return wallet;
-  }
+  return {
+    id: key,
+    user_id: userId,
+    provider: "none",
+    provider_wallet_id: null,
+    address: null,
+    chain: chainType,
+    status: "disconnected",
+    created_at: new Date().toISOString(),
+  };
 }
 
 // POST /wallet/create — create a server-side wallet via Privy
@@ -177,7 +202,45 @@ export const createEmbeddedWallet = async (req, res) => {
   }
 
   try {
-    const wallet = await ensureUserWallet(userId, email, chainType);
+    const key = `${userId}:${chainType}`;
+    const existing = await getWalletByUserId(userId);
+    if (existing) {
+      return res.json({ ok: true, data: existing });
+    }
+
+    if (!isPrivyEnabled) {
+      return res.json({
+        ok: true,
+        data: {
+          id: key,
+          user_id: userId,
+          provider: 'local',
+          provider_wallet_id: null,
+          address: null,
+          chain: chainType,
+          status: 'disconnected',
+          created_at: new Date().toISOString(),
+        },
+      });
+    }
+
+    const privyWallet = await createPrivyWallet(chainType);
+    const wallet = await saveWallet(userId, privyWallet, chainType);
+
+    await logAuditEvent(AUDIT_ACTIONS.WALLET_CREATED, {
+      user_id: userId,
+      wallet_id: wallet.id,
+      asset: chainType,
+      tx_hash: null,
+      metadata: {
+        provider: wallet.provider,
+        provider_wallet_id: wallet.provider_wallet_id,
+        wallet_address: wallet.address,
+        created_at: wallet.created_at,
+      },
+      request_id: `wallet_create_${Date.now()}`,
+    });
+
     return res.json({ ok: true, data: wallet });
   } catch (err) {
     console.error("wallet creation error", err?.message || err);
@@ -188,6 +251,20 @@ export const createEmbeddedWallet = async (req, res) => {
 };
 
 // POST /wallet/send — sign and broadcast a transaction via Privy
+async function resolvePrivyWalletId(walletId) {
+  const { data, error } = await supabase
+    .from('wallets')
+    .select('provider_wallet_id')
+    .or(`id.eq.${walletId},provider_wallet_id.eq.${walletId}`)
+    .limit(1);
+
+  if (error) {
+    console.error('resolvePrivyWalletId error', error.message || error);
+    return null;
+  }
+  return data?.[0]?.provider_wallet_id || null;
+}
+
 export const sendTxToAddress = async (req, res) => {
   const { walletId, toAddress, tokenAddress, amount, chain } = req.body;
 
@@ -204,32 +281,131 @@ export const sendTxToAddress = async (req, res) => {
   }
 
   try {
-    // Build a Solana transaction request for Privy
+    const providerWalletId = await resolvePrivyWalletId(walletId);
+    if (!providerWalletId) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "Invalid wallet identifier for transaction" });
+    }
+
+    // Connect to Solana
+    const connection = new Connection(SOLANA_RPC_URL, "confirmed");
+
+    // Get wallet details from Privy
+    const walletResponse = await axios.get(
+      `${PRIVY_BASE}/v1/wallets/${providerWalletId}`,
+      { headers: privyHeaders() }
+    );
+    const walletData = walletResponse.data;
+
+    if (!walletData.address) {
+      return res.status(400).json({ ok: false, error: "Wallet address not found" });
+    }
+
+    const senderPublicKey = new PublicKey(walletData.address);
+    const recipientPublicKey = new PublicKey(toAddress);
+
+    let transaction = new Transaction();
+    let signers = [];
+
+    if (tokenAddress) {
+      // Handle SPL token transfer (USDC)
+      const mint = tokenAddress === "USDC" ? USDC_MINT : new PublicKey(tokenAddress);
+
+      // Validate USDC mint
+      if (tokenAddress === "USDC" && !mint.equals(USDC_MINT)) {
+        return res.status(400).json({ ok: false, error: "Invalid USDC mint address" });
+      }
+
+      // Get sender's ATA
+      const senderATA = await getAssociatedTokenAddress(
+        mint,
+        senderPublicKey,
+        false,
+        TOKEN_PROGRAM_ID,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      );
+
+      // Get recipient's ATA
+      const recipientATA = await getAssociatedTokenAddress(
+        mint,
+        recipientPublicKey,
+        false,
+        TOKEN_PROGRAM_ID,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      );
+
+      // Check if recipient ATA exists, create if not
+      try {
+        await getAccount(connection, recipientATA);
+      } catch (error) {
+        // ATA doesn't exist, add instruction to create it
+        transaction.add(
+          createAssociatedTokenAccountInstruction(
+            senderPublicKey, // payer
+            recipientATA, // ata
+            recipientPublicKey, // owner
+            mint, // mint
+            TOKEN_PROGRAM_ID,
+            ASSOCIATED_TOKEN_PROGRAM_ID
+          )
+        );
+      }
+
+      // Convert amount to smallest unit
+      const decimals = tokenAddress === "USDC" ? USDC_DECIMALS : 6; // Default to 6 for most tokens
+      const transferAmount = Math.floor(parseFloat(amount) * Math.pow(10, decimals));
+
+      // Add transfer instruction
+      transaction.add(
+        transferChecked(
+          TOKEN_PROGRAM_ID,
+          senderATA, // source
+          mint, // mint
+          recipientATA, // destination
+          senderPublicKey, // owner
+          [], // multiSigners
+          transferAmount, // amount
+          decimals // decimals
+        )
+      );
+    } else {
+      // Handle native SOL transfer
+      const lamports = Math.floor(parseFloat(amount) * LAMPORTS_PER_SOL);
+
+      transaction.add(
+        SystemProgram.transfer({
+          fromPubkey: senderPublicKey,
+          toPubkey: recipientPublicKey,
+          lamports,
+        })
+      );
+    }
+
+    // Get recent blockhash
+    const { blockhash } = await connection.getLatestBlockhash();
+    transaction.recentBlockhash = blockhash;
+    transaction.feePayer = senderPublicKey;
+
+    // Serialize transaction for Privy
+    const serializedTx = transaction.serialize({
+      requireAllSignatures: false,
+      verifySignatures: false,
+    });
+
+    // Send to Privy for signing and broadcasting
     const caip2 = chainToCaip2(chain);
     const txBody = {
       chain_type: "solana",
       method: "solana_signAndSendTransaction",
       caip2,
       params: {
-        transaction: {
-          to: toAddress,
-          value: Math.floor(amount * 1e9),
-        },
+        transaction: serializedTx.toString("base64"),
       },
     };
 
-    // If a token address is provided, build an ERC-20 transfer instead
-    if (tokenAddress) {
-      const transferData = encodeErc20Transfer(toAddress, amount);
-      txBody.params.transaction = {
-        to: tokenAddress,
-        data: transferData,
-        value: 0,
-      };
-    }
-
     const r = await axios.post(
-      `${PRIVY_BASE}/v1/wallets/${walletId}/rpc`,
+      `${PRIVY_BASE}/v1/wallets/${providerWalletId}/rpc`,
       txBody,
       { headers: privyHeaders() }
     );
@@ -243,11 +419,80 @@ export const sendTxToAddress = async (req, res) => {
   }
 };
 
+// GET /wallet/deposit-address — retrieve permanent Solana deposit address and summary balances
+export const getDepositAddress = async (req, res) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ ok: false, error: 'Not authenticated' });
+  }
+
+  try {
+    const wallet = await getWalletByUserId(userId);
+    if (!wallet) {
+      return res.status(404).json({ ok: false, error: 'Wallet not found' });
+    }
+
+    const balanceResult = await syncWalletBalances(wallet);
+
+    return res.json({
+      ok: true,
+      data: {
+        address: wallet.address,
+        chain: wallet.chain,
+        is_primary: wallet.is_primary,
+        last_synced_at: balanceResult.last_synced_at || wallet.last_synced_at || wallet.last_scanned_at || wallet.last_accessed_at,
+        balances: {
+          SOL: balanceResult.asset_balances.SOL.app,
+          USDC: balanceResult.asset_balances.USDC.app,
+          onchain_SOL: balanceResult.asset_balances.SOL.blockchain,
+          ledger_SOL: balanceResult.asset_balances.SOL.app,
+        },
+        sync_status: {
+          sol: balanceResult.asset_balances.SOL.status,
+          usdc: balanceResult.asset_balances.USDC.status,
+        },
+      },
+    });
+  } catch (err) {
+    console.error('getDepositAddress error', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Failed to fetch deposit address' });
+  }
+};
+
+// GET /wallet/balances — compare on-chain and app balances for the primary wallet
+export const getWalletBalances = async (req, res) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ ok: false, error: 'Not authenticated' });
+  }
+
+  try {
+    const wallet = await getWalletByUserId(userId);
+    if (!wallet) {
+      return res.status(404).json({ ok: false, error: 'Wallet not found' });
+    }
+
+    const balanceResult = await syncWalletBalances(wallet);
+    await supabase
+      .from('wallets')
+      .update({ last_synced_at: new Date().toISOString() })
+      .eq('id', wallet.id);
+
+    return res.json({ ok: true, data: { ...balanceResult, last_synced_at: new Date().toISOString() } });
+  } catch (err) {
+    console.error('getWalletBalances error', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Failed to fetch wallet balances' });
+  }
+};
+
 // GET /wallet/:walletId — get wallet details
 export const getWallet = async (req, res) => {
   const { walletId } = req.params;
   try {
-    const r = await axios.get(`${PRIVY_BASE}/v1/wallets/${walletId}`, {
+    const providerWalletId = await resolvePrivyWalletId(walletId);
+    const walletIdentifier = providerWalletId || walletId;
+
+    const r = await axios.get(`${PRIVY_BASE}/v1/wallets/${walletIdentifier}`, {
       headers: privyHeaders(),
     });
     return res.json({ ok: true, data: r.data });

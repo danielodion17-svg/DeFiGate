@@ -11,7 +11,10 @@ export const authenticate = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded;
+    req.user = {
+      ...decoded,
+      role: decoded.role || 'user',
+    };
     next();
   } catch (err) {
     return res.status(401).json({ ok: false, error: "Invalid or expired token" });
@@ -20,7 +23,7 @@ export const authenticate = (req, res, next) => {
 
 export const generateToken = (user) => {
   return jwt.sign(
-    { id: user.id, email: user.email },
+    { id: user.id, email: user.email, role: user.role || 'user' },
     JWT_SECRET,
     { expiresIn: "7d" }
   );

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useLocation, Routes, Route, Navigate } from 'react-router-dom'
 import './App.css'
 import { useToast } from './hooks/useToast'
 import { useBackendStatus } from './hooks/useBackendStatus'
@@ -23,6 +24,11 @@ import HistoryPage from './pages/HistoryPage'
 import SettingsPage from './pages/SettingsPage'
 import SignupPage from './pages/SignupPage'
 import TestPanel from './pages/TestPanel'
+import AdminPortal from './pages/AdminPortal'
+import AdminDashboard from './pages/AdminDashboard'
+import AdminUsersPage from './pages/AdminUsersPage'
+import AdminWithdrawalsPage from './pages/AdminWithdrawalsPage'
+import AdminAuditPage from './pages/AdminAuditPage'
 import { apiUrl, buildInternalTransferPayload } from './api'
 
 function App() {
@@ -35,6 +41,8 @@ function App() {
   const backendStatus = useBackendStatus();
   const { isDark, toggleTheme } = useTheme();
   const { refreshUser } = useUserRefresh();
+  const location = useLocation();
+  const isAdminRoute = location.pathname.startsWith('/admin');
 
   // Restore user session on app load
   useEffect(() => {
@@ -120,7 +128,7 @@ function App() {
   };
 
   // Wallet functions
-  const createWallet = async (chain = "ethereum") => {
+  const createWallet = async (chain = "solana") => {
     if (!currentUser) {
       toast("Please sign in first", "error");
       setAuthModalOpen(true);
@@ -259,7 +267,7 @@ function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          walletId: currentUser.wallet.id,
+          walletId: currentUser.wallet.provider_wallet_id || currentUser.wallet.id,
           toAddress,
           tokenAddress: tokenAddress || undefined,
           amount: parseFloat(amount),
@@ -336,60 +344,81 @@ function App() {
 
       {/* Main Content */}
       <main className="main-content">
-        {!currentUser && currentView === 'signup' && (
-          <SignupPage
-            onAuthenticated={(user) => {
-              setCurrentUser(user);
-              if (user.token) {
-                localStorage.setItem('authToken', user.token);
-              }
-              setCurrentView('dashboard');
-              toast(`Welcome! Account created for ${user.email}`, 'success');
-            }}
-            onShowToast={toast}
-            onCancel={() => setCurrentView('dashboard')}
+        <Routes>
+          <Route
+            path="/admin/*"
+            element={<AdminPortal user={currentUser} />}
+          >
+            <Route index element={<AdminDashboard user={currentUser} />} />
+            <Route path="dashboard" element={<AdminDashboard user={currentUser} />} />
+            <Route path="users" element={<AdminUsersPage user={currentUser} />} />
+            <Route path="withdrawals" element={<AdminWithdrawalsPage user={currentUser} />} />
+            <Route path="audit" element={<AdminAuditPage user={currentUser} />} />
+            <Route path="*" element={<Navigate to="dashboard" replace />} />
+          </Route>
+
+          <Route
+            path="/*"
+            element={
+              <>
+                {!currentUser && currentView === 'signup' && (
+                  <SignupPage
+                    onAuthenticated={(user) => {
+                      setCurrentUser(user);
+                      if (user.token) {
+                        localStorage.setItem('authToken', user.token);
+                      }
+                      setCurrentView('dashboard');
+                      toast(`Welcome! Account created for ${user.email}`, 'success');
+                    }}
+                    onShowToast={toast}
+                    onCancel={() => setCurrentView('dashboard')}
+                  />
+                )}
+
+                {!currentUser && currentView !== 'signup' && (
+                  <div className="auth-required">
+                    <div className="auth-card">
+                      <h1>Welcome to DeFiGate</h1>
+                      <p>Your gateway to DeFi in Africa</p>
+                      <button className="btn btn-primary" onClick={() => setCurrentView('signup')}>
+                        Sign up
+                      </button>
+                      <p className="auth-cta">
+                        Already have an account?{' '}
+                        <button className="link-btn" onClick={() => setAuthModalOpen(true)}>
+                          Sign in
+                        </button>
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {currentUser && (
+                  <>
+                    {currentView === 'dashboard' && <DashboardRefactored currentUser={currentUser} navigateTo={navigateTo} />}
+                    {currentView === 'wallet' && <Wallet currentUser={currentUser} createWallet={createWallet} />}
+                    {currentView === 'ramp' && <Ramp currentUser={currentUser} createOnramp={createOnramp} createOfframp={createOfframp} />}
+                    {currentView === 'send' && <Send currentUser={currentUser} sendTokens={sendTokens} />}
+                    {currentView === 'deposit-bank' && <DepositBankPage currentUser={currentUser} createOnramp={createOnramp} navigateTo={navigateTo} />}
+                    {currentView === 'deposit-exchange' && <DepositExchangePage currentUser={currentUser} navigateTo={navigateTo} />}
+                    {currentView === 'withdraw-bank' && <WithdrawBankPage currentUser={currentUser} createOfframp={createOfframp} navigateTo={navigateTo} />}
+                    {currentView === 'withdraw-exchange' && <WithdrawExchangePage currentUser={currentUser} sendTokens={sendTokens} navigateTo={navigateTo} />}
+                    {currentView === 'transfer-internal' && <TransferInternalPage currentUser={currentUser} internalTransfer={sendInternalTransfer} onShowToast={toast} navigateTo={navigateTo} />}
+                    {currentView === 'finances' && <FinancesPage currentUser={currentUser} navigateTo={navigateTo} />}
+                    {currentView === 'history' && <HistoryPage currentUser={currentUser} navigateTo={navigateTo} />}
+                    {currentView === 'settings' && <SettingsPage currentUser={currentUser} navigateTo={navigateTo} toggleAuth={toggleAuth} />}
+                    {currentView === 'test-panel' && <TestPanel currentUser={currentUser} />}
+                  </>
+                )}
+              </>
+            }
           />
-        )}
-
-        {!currentUser && currentView !== 'signup' && (
-          <div className="auth-required">
-            <div className="auth-card">
-              <h1>Welcome to DeFiGate</h1>
-              <p>Your gateway to DeFi in Africa</p>
-              <button className="btn btn-primary" onClick={() => setCurrentView('signup')}>
-                Sign up
-              </button>
-              <p className="auth-cta">
-                Already have an account?{' '}
-                <button className="link-btn" onClick={() => setAuthModalOpen(true)}>
-                  Sign in
-                </button>
-              </p>
-            </div>
-          </div>
-        )}
-
-        {currentUser && (
-          <>
-            {currentView === 'dashboard' && <DashboardRefactored currentUser={currentUser} navigateTo={navigateTo} />}
-            {currentView === 'wallet' && <Wallet currentUser={currentUser} createWallet={createWallet} />}
-            {currentView === 'ramp' && <Ramp currentUser={currentUser} createOnramp={createOnramp} createOfframp={createOfframp} />}
-            {currentView === 'send' && <Send currentUser={currentUser} sendTokens={sendTokens} />}
-            {currentView === 'deposit-bank' && <DepositBankPage currentUser={currentUser} createOnramp={createOnramp} navigateTo={navigateTo} />}
-            {currentView === 'deposit-exchange' && <DepositExchangePage currentUser={currentUser} navigateTo={navigateTo} />}
-            {currentView === 'withdraw-bank' && <WithdrawBankPage currentUser={currentUser} createOfframp={createOfframp} navigateTo={navigateTo} />}
-            {currentView === 'withdraw-exchange' && <WithdrawExchangePage currentUser={currentUser} sendTokens={sendTokens} navigateTo={navigateTo} />}
-            {currentView === 'transfer-internal' && <TransferInternalPage currentUser={currentUser} internalTransfer={sendInternalTransfer} onShowToast={toast} navigateTo={navigateTo} />}
-            {currentView === 'finances' && <FinancesPage currentUser={currentUser} navigateTo={navigateTo} />}
-            {currentView === 'history' && <HistoryPage currentUser={currentUser} navigateTo={navigateTo} />}
-            {currentView === 'settings' && <SettingsPage currentUser={currentUser} navigateTo={navigateTo} toggleAuth={toggleAuth} />}
-            {currentView === 'test-panel' && <TestPanel currentUser={currentUser} />}
-          </>
-        )}
+        </Routes>
       </main>
 
       {/* Bottom Navigation */}
-      {currentUser && <BottomNav currentView={currentView} navigateTo={navigateTo} />}
+      {currentUser && !isAdminRoute && <BottomNav currentView={currentView} navigateTo={navigateTo} />}
 
       {/* Auth Modal */}
       {authModalOpen && (

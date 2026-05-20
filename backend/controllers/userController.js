@@ -2,11 +2,12 @@ import bcrypt from "bcrypt";
 import crypto from "crypto";
 import pool from "../db.js";
 import { generateToken } from "../middleware/auth.js";
-import { ensureUserWallet } from "./walletController.js";
+import { getCanonicalWallet } from "./walletController.js";
 import { sendVerificationEmail } from "../services/emailService.js";
 import { respondError, respondSuccess } from "../utils/response.js";
-import Balance from "../models/Balance.js";
 import Transaction from "../models/Transaction.js";
+import { sequelize } from "../models/index.js";
+import { getOrCreateAccount, creditAccount, getDerivedBalance } from "../services/accountService.js";
 
 function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
@@ -16,33 +17,24 @@ function generateVerificationToken() {
   return crypto.randomBytes(24).toString("hex");
 }
 
-async function getWalletForUser(userId) {
-  const result = await pool.query(
-    `SELECT id, user_id, provider, provider_wallet_id, address, chain, created_at
-     FROM wallets WHERE user_id = $1 LIMIT 1`,
-    [userId]
-  );
-  return result.rows[0] || null;
-}
-
 export const signup = async (req, res) => {
-  const { email, password, name, walletAddress, phone, company } = req.body;
-  const normalizedEmail = normalizeEmail(email);
+const { email, password, name, phone, company } = req.body;
+    const normalizedEmail = normalizeEmail(email);
 
-  if (!normalizedEmail || !password || password.length < 6) {
-    return respondError(res, 400, "Email and password (min 6 chars) are required", false);
-  }
+    if (!normalizedEmail || !password || password.length < 6) {
+      return respondError(res, 400, "Email and password (min 6 chars) are required", false);
+    }
 
-  const verificationToken = generateVerificationToken();
-  const preferredChain = "solana";
+    const verificationToken = generateVerificationToken();
+    const preferredChain = "solana";
 
-  try {
-    const hash = await bcrypt.hash(password, 10);
-    const result = await pool.query(
-      `INSERT INTO users (email, password_hash, name, wallet_address, phone, company, is_verified, email_verification_token, kyc_status, preferred_chain)
-       VALUES ($1, $2, $3, $4, $5, $6, false, $7, 'pending', $8)
-       RETURNING id, email, name, wallet_address, phone, company, is_verified, kyc_status, preferred_chain`,
-      [normalizedEmail, hash, name || null, walletAddress || null, phone || null, company || null, verificationToken, preferredChain]
+    try {
+      const hash = await bcrypt.hash(password, 10);
+      const result = await pool.query(
+        `INSERT INTO users (email, password_hash, name, phone, company, is_verified, email_verification_token, kyc_status, preferred_chain, role)
+         VALUES ($1, $2, $3, $4, $5, false, $6, 'pending', $7, 'user')
+         RETURNING id, email, name, phone, company, is_verified, kyc_status, preferred_chain, role`,
+        [normalizedEmail, hash, name || null, phone || null, company || null, verificationToken, preferredChain]
     );
 
     const user = result.rows[0];
@@ -54,23 +46,23 @@ export const signup = async (req, res) => {
     );
     user.is_verified = true;
 
-    // Create balance record with zero starting funds
     try {
-      await Balance.create({
-        user_id: user.id,
-        available_balance: 0.0,
-      });
+      await getOrCreateAccount(user.id, 'USDC');
+      await getOrCreateAccount(user.id, 'SOL');
     } catch (err) {
-      console.error("Balance creation error", err);
+      console.error("Account creation error", err);
       // Continue, but log
     }
 
     let wallet;
     try {
-      wallet = await ensureUserWallet(user.id, user.email, preferredChain);
+      wallet = await getCanonicalWallet(user.id, preferredChain);
+      if (!wallet) {
+        wallet = { status: "disconnected", error: "Wallet not found" };
+      }
     } catch (err) {
       console.error("DB signup wallet error", err?.message || err);
-      wallet = { status: "disconnected", error: err?.message || "Wallet create failed" };
+      wallet = { status: "disconnected", error: err?.message || "Wallet lookup failed" };
     }
 
     const token = generateToken(user);
@@ -79,12 +71,13 @@ export const signup = async (req, res) => {
         id: user.id,
         email: user.email,
         name: user.name,
-        walletAddress: user.wallet_address,
+        walletAddress: wallet?.address || null,
         phone: user.phone,
         company: user.company,
         is_verified: user.is_verified,
         kyc_status: user.kyc_status,
         available_balance: 0.0,
+        role: user.role || 'user',
         wallet,
       },
       token,
@@ -114,7 +107,7 @@ export const signin = async (req, res) => {
 
   try {
     const result = await pool.query(
-      `SELECT id, email, name, wallet_address, phone, company, password_hash, is_verified, kyc_status, preferred_chain
+      `SELECT id, email, name, phone, company, password_hash, is_verified, kyc_status, preferred_chain, role
        FROM users WHERE email = $1`,
       [normalizedEmail]
     );
@@ -130,12 +123,14 @@ export const signin = async (req, res) => {
     }
 
     // Get balance
-    const balanceResult = await pool.query(`SELECT available_balance FROM balances WHERE user_id = $1`, [user.id]);
-    const available_balance = balanceResult.rows[0]?.available_balance || 0;
+    const available_balance = await getDerivedBalance(user.id, 'USDC');
 
     let wallet;
     try {
-      wallet = await ensureUserWallet(user.id, user.email, user.preferred_chain || "solana");
+      wallet = await getCanonicalWallet(user.id, user.preferred_chain || "solana");
+      if (!wallet) {
+        wallet = { status: "disconnected", error: "Wallet not found" };
+      }
     } catch (err) {
       console.error("DB signin wallet error", err?.message || err);
       wallet = { status: "disconnected", error: err?.message || "Wallet lookup failed" };
@@ -147,12 +142,13 @@ export const signin = async (req, res) => {
         id: user.id,
         email: user.email,
         name: user.name,
-        walletAddress: user.wallet_address,
+        walletAddress: wallet?.address || null,
         phone: user.phone,
         company: user.company,
         available_balance: available_balance,
         is_verified: user.is_verified,
         kyc_status: user.kyc_status,
+        role: user.role || 'user',
         wallet,
       },
       token,
@@ -239,30 +235,30 @@ export const topup = async (req, res) => {
   }
 
   try {
-    await pool.query('BEGIN');
-    const balanceResult = await pool.query(
-      `SELECT available_balance FROM balances WHERE user_id = $1 FOR UPDATE`,
-      [userId]
-    );
-    if (balanceResult.rows.length === 0) {
-      await pool.query('ROLLBACK');
-      return respondError(res, 404, "Balance not found", false);
-    }
-    const currentBalance = parseFloat(balanceResult.rows[0].available_balance);
-    const newBalance = currentBalance + parseFloat(amount);
-    await pool.query(
-      `UPDATE balances SET available_balance = $1 WHERE user_id = $2`,
-      [newBalance, userId]
-    );
-    await pool.query(
-      `INSERT INTO transactions (user_id, type, amount, asset, status, reference)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [userId, 'deposit', amount, 'USDC', 'completed', 'topup']
-    );
-    await pool.query('COMMIT');
+    await sequelize.transaction(async (tx) => {
+      const depositTx = await Transaction.create(
+        {
+          user_id: userId,
+          type: 'deposit',
+          amount,
+          asset: 'USDC',
+          status: 'completed',
+          reference: 'topup',
+        },
+        { transaction: tx }
+      );
+
+      await creditAccount(userId, amount, {
+        asset: 'USDC',
+        txHash: `topup_${depositTx.id}`,
+        metadata: { source: 'topup' },
+        transaction: tx,
+      });
+    });
+
+    const newBalance = await getDerivedBalance(userId, 'USDC');
     return respondSuccess(res, { balance: newBalance }, "Topup successful");
   } catch (err) {
-    await pool.query('ROLLBACK');
     console.error("topup error", err);
     return respondError(res, 500, "Unable to process topup", true, err.message);
   }
@@ -276,7 +272,7 @@ export const updateProfile = async (req, res) => {
     const result = await pool.query(
       `UPDATE users SET name = COALESCE($1, name), phone = COALESCE($2, phone), company = COALESCE($3, company), updated_at = NOW()
        WHERE id = $4
-       RETURNING id, email, name, wallet_address, phone, company`,
+       RETURNING id, email, name, phone, company, preferred_chain`,
       [name, phone, company, user.id]
     );
 
@@ -285,12 +281,24 @@ export const updateProfile = async (req, res) => {
     }
 
     const updatedUser = result.rows[0];
+    let wallet;
+    try {
+      wallet = await getCanonicalWallet(updatedUser.id, updatedUser.preferred_chain || 'solana');
+      if (!wallet) {
+        wallet = { status: 'disconnected', error: 'Wallet not found' };
+      }
+    } catch (err) {
+      console.error('updateProfile wallet error', err?.message || err);
+      wallet = { status: 'disconnected', error: err?.message || 'Wallet lookup failed' };
+    }
+
     return respondSuccess(res, {
       user: {
         id: updatedUser.id,
         email: updatedUser.email,
         name: updatedUser.name,
-        walletAddress: updatedUser.wallet_address,
+        walletAddress: wallet?.address || null,
+        wallet,
         phone: updatedUser.phone,
         company: updatedUser.company,
       },
@@ -357,12 +365,43 @@ export const getTransactions = async (req, res) => {
   const user = req.user;
 
   try {
-    const transactions = await Transaction.findAll({
-      where: { user_id: user.id },
-      order: [['created_at', 'DESC']],
-    });
+    // Get transactions from the transactions table
+    const transactionsResult = await pool.query(
+      `SELECT id, type, amount, asset, status, tx_hash, reference, recipient_address, created_at, broadcasted_at, confirmed_at, failed_at, failure_reason, network_fee, 'transaction'::text AS direction
+       FROM transactions
+       WHERE user_id = $1
+       ORDER BY created_at DESC`,
+      [user.id]
+    );
 
-    return respondSuccess(res, { transactions }, "Transactions retrieved");
+    // Get transfers from the transfers table
+    const transfersResult = await pool.query(
+      `SELECT 'transfer_' || id AS id,
+              'transfer' AS type,
+              amount,
+              'USDC' AS asset,
+              'completed'::text AS status,
+              NULL AS tx_hash,
+              NULL AS reference,
+              NULL AS recipient_address,
+              created_at,
+              created_at AS broadcasted_at,
+              NULL AS confirmed_at,
+              NULL AS failed_at,
+              NULL AS failure_reason,
+              NULL AS network_fee,
+              CASE WHEN sender_id = $1 THEN 'outgoing' ELSE 'incoming' END AS direction
+       FROM transfers
+       WHERE sender_id = $1 OR receiver_id = $1
+       ORDER BY created_at DESC`,
+      [user.id]
+    );
+
+    // Combine and sort all transactions
+    const allTransactions = [...transactionsResult.rows, ...transfersResult.rows]
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    return respondSuccess(res, { transactions: allTransactions }, "Transactions retrieved");
   } catch (err) {
     console.error("getTransactions error", err);
     return respondError(res, 500, "Failed to retrieve transactions", true, err.message);
@@ -373,14 +412,15 @@ export const getBalances = async (req, res) => {
   const user = req.user;
 
   try {
-    const balancesResult = await pool.query(
-      `SELECT asset, available_balance, pending_balance, updated_at
-       FROM balances
-       WHERE user_id = $1`,
-      [user.id]
-    );
+    const usdcBalance = await getDerivedBalance(user.id, 'USDC');
+    const solBalance = await getDerivedBalance(user.id, 'SOL');
 
-    return respondSuccess(res, { balances: balancesResult.rows }, "Balances retrieved");
+    return respondSuccess(res, {
+      balances: [
+        { asset: 'USDC', available_balance: usdcBalance, pending_balance: 0, updated_at: null },
+        { asset: 'SOL', available_balance: solBalance, pending_balance: 0, updated_at: null },
+      ],
+    }, "Balances retrieved");
   } catch (err) {
     console.error("getBalances error", err);
     return respondError(res, 500, "Failed to retrieve balances", true, err.message);
@@ -395,10 +435,9 @@ export const getMe = async (req, res) => {
 
   try {
     const result = await pool.query(
-      `SELECT u.id, u.email, u.is_verified, b.available_balance
-       FROM users u
-       LEFT JOIN balances b ON u.id = b.user_id
-       WHERE u.id = $1`,
+      `SELECT id, email, is_verified, role, preferred_chain
+       FROM users
+       WHERE id = $1`,
       [user.id]
     );
     if (result.rows.length === 0) {
@@ -408,11 +447,16 @@ export const getMe = async (req, res) => {
 
     let wallet;
     try {
-      wallet = await ensureUserWallet(fullUser.id, fullUser.email, "solana");
+      wallet = await getCanonicalWallet(fullUser.id, fullUser.preferred_chain || "solana");
+      if (!wallet) {
+        wallet = { status: "disconnected", error: "Wallet not found" };
+      }
     } catch (err) {
       console.error("getMe wallet error", err?.message || err);
       wallet = { status: "disconnected", error: err?.message || "Wallet lookup failed" };
     }
+
+    const available_balance = await getDerivedBalance(fullUser.id, 'USDC');
 
     res.json({
       ok: true,
@@ -420,8 +464,10 @@ export const getMe = async (req, res) => {
         user: {
           id: fullUser.id,
           email: fullUser.email,
-          available_balance: Number(fullUser.available_balance || 0),
+          role: fullUser.role || 'user',
+          available_balance,
           is_verified: fullUser.is_verified,
+          walletAddress: wallet?.address || null,
           wallet,
         },
       },

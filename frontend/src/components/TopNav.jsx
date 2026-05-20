@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import logoImg from '../assets/logo.png';
 
 const TopNav = ({ user, theme, toggleTheme, onLogout, backendStatus }) => {
+  const navigate = useNavigate();
   const [showProfileMenu, setShowProfileMenu] = useState(false);
 
   const getUserInitial = () => {
@@ -67,6 +69,29 @@ const TopNav = ({ user, theme, toggleTheme, onLogout, backendStatus }) => {
               }}>
                 {user?.walletAddress}
               </div>
+              {(user?.role === 'admin' || user?.role === 'support') && (
+                <button
+                  onClick={() => {
+                    navigate('/admin');
+                    setShowProfileMenu(false);
+                  }}
+                  style={{
+                    width: '100%',
+                    background: 'none',
+                    border: 'none',
+                    borderTop: '1px solid var(--border)',
+                    padding: '12px 16px',
+                    textAlign: 'left',
+                    color: 'var(--text)',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    fontWeight: 500,
+                    transition: 'background 0.2s ease',
+                  }}
+                >
+                  Admin Portal
+                </button>
+              )}
               <button
                 onClick={() => {
                   onLogout();

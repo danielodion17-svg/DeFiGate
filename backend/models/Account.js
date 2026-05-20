@@ -28,12 +28,28 @@ const Account = sequelize.define(
       allowNull: false,
       defaultValue: 0,
     },
+    is_frozen: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+    freeze_reason: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
   },
   {
     tableName: "balances",
     timestamps: true,
     createdAt: false,
     updatedAt: "updated_at",
+    indexes: [
+      {
+        unique: true,
+        fields: ["user_id", "asset"],
+        name: "accounts_user_asset_unique",
+      },
+    ],
   }
 );
 

@@ -1,7 +1,6 @@
-import crypto from "crypto";
-import pool from "../db.js";
-import Balance from "../models/Balance.js";
 import Transaction from "../models/Transaction.js";
+import { sequelize } from "../models/index.js";
+import { creditAccount, getDerivedBalance } from "../services/accountService.js";
 
 export const depositTestFunds = async (req, res) => {
   const userId = req.user?.id;
@@ -19,87 +18,55 @@ export const depositTestFunds = async (req, res) => {
   const txReference = reference?.trim() || `test-deposit-${Date.now()}`;
 
   try {
-    const existing = await pool.query(
-      `SELECT id, amount, status FROM transactions WHERE user_id = $1 AND type = $2 AND reference = $3`,
-      [userId, 'deposit', txReference]
-    );
+    const existing = await Transaction.findOne({
+      where: { user_id: userId, type: 'deposit', reference: txReference }
+    });
 
-    if (existing.rows.length > 0) {
-      const existingTx = existing.rows[0];
-      const balanceResult = await pool.query(
-        `SELECT available_balance FROM balances WHERE user_id = $1`,
-        [userId]
-      );
-
+    if (existing) {
+      const existingBalance = await getDerivedBalance(userId, 'USDC');
       return res.json({
         ok: true,
         data: {
-          transaction: existingTx,
-          available_balance: Number(balanceResult.rows[0]?.available_balance || 0),
+          transaction: existing,
+          available_balance: existingBalance,
           message: "Existing deposit returned",
         },
       });
     }
 
-    await pool.query('BEGIN');
+    const transactionResult = await sequelize.transaction(async (tx) => {
+      const createdTransaction = await Transaction.create({
+        user_id: userId,
+        type: 'deposit',
+        amount: depositAmount,
+        asset: 'USDC',
+        description: `Test deposit of $${depositAmount}`,
+        reference: txReference,
+        tx_hash: `solana-deposit-${Date.now()}`,
+        status: 'completed',
+      }, { transaction: tx });
 
-    let balanceResult = await pool.query(
-      `SELECT available_balance FROM balances WHERE user_id = $1`,
-      [userId]
-    );
+      await creditAccount(userId, depositAmount, {
+        asset: 'USDC',
+        txHash: `test-deposit-${txReference}`,
+        metadata: { reference: txReference, source: 'test' },
+        transaction: tx,
+      });
 
-    if (balanceResult.rows.length === 0) {
-      await pool.query(
-        `INSERT INTO balances (user_id, available_balance) VALUES ($1, $2)`,
-        [userId, 0]
-      );
-      balanceResult = await pool.query(
-        `SELECT available_balance FROM balances WHERE user_id = $1`,
-        [userId]
-      );
-    }
+      return createdTransaction;
+    });
 
-    const currentBalance = Number(balanceResult.rows[0]?.available_balance || 0);
-    const newBalance = currentBalance + depositAmount;
-
-    const transactionResult = await pool.query(
-      `INSERT INTO transactions (user_id, type, amount, asset, description, reference, tx_hash, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING id, amount, status`,
-      [
-        userId,
-        'deposit',
-        depositAmount,
-        'USDC',
-        `Test deposit of $${depositAmount}`,
-        txReference,
-        `solana-deposit-${Date.now()}`,
-        'completed'
-      ]
-    );
-
-    await pool.query(
-      `UPDATE balances SET available_balance = available_balance + $1 WHERE user_id = $2`,
-      [depositAmount, userId]
-    );
-
-    await pool.query('COMMIT');
-
-    const newBalanceResult = await pool.query(
-      `SELECT available_balance FROM balances WHERE user_id = $1`,
-      [userId]
-    );
+    const newBalance = await getDerivedBalance(userId, 'USDC');
 
     return res.json({
       ok: true,
       data: {
-        transaction: transactionResult.rows[0],
-        available_balance: Number(newBalanceResult.rows[0]?.available_balance || 0),
+        transaction: transactionResult,
+        available_balance: newBalance,
       },
       message: "Test deposit applied",
     });
   } catch (err) {
-    await pool.query('ROLLBACK');
     console.error("depositTestFunds error", err);
     res.status(500).json({ ok: false, error: "Test deposit failed" });
   }
