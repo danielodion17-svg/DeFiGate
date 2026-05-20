@@ -1,4 +1,5 @@
 import { supabase } from '../config/supabase.js';
+import pool from '../db.js';
 
 function normalizeChain(chainType) {
   return String(chainType || 'solana').toLowerCase();
@@ -11,7 +12,30 @@ function throwIfSupabaseError(error, context) {
   }
 }
 
+function normalizeWalletRow(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    id: row.id,
+    user_id: row.user_id,
+    provider: row.provider,
+    provider_wallet_id: row.provider_wallet_id,
+    address: row.address,
+    chain: row.chain,
+    encrypted_private_key: row.encrypted_private_key,
+    last_scanned_signature: row.last_scanned_signature,
+    last_scanned_at: row.last_scanned_at,
+    is_primary: row.is_primary,
+    is_archived: row.is_archived,
+    archived_at: row.archived_at,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
 export async function warnIfDuplicateWallets(userId, chainType = 'solana') {
+  if (!supabase) return;
+
   const { count, error } = await supabase
     .from('wallets')
     .select('id', { count: 'exact', head: true })
@@ -28,41 +52,66 @@ export async function warnIfDuplicateWallets(userId, chainType = 'solana') {
 
 export async function getCanonicalWallet(userId, chainType = 'solana') {
   if (!userId) return null;
+  const chain = normalizeChain(chainType);
 
-  const { data, error } = await supabase
-    .from('wallets')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('chain', normalizeChain(chainType))
-    .order('is_primary', { ascending: false })
-    .order('created_at', { ascending: true })
-    .limit(1);
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('wallets')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('chain', chain)
+      .order('is_primary', { ascending: false })
+      .order('created_at', { ascending: true })
+      .limit(1);
 
-  throwIfSupabaseError(error, 'getCanonicalWallet');
+    throwIfSupabaseError(error, 'getCanonicalWallet');
 
-  const wallet = (data && data[0]) || null;
-  if (wallet) {
-    await warnIfDuplicateWallets(userId, chainType);
+    const wallet = (data && data[0]) || null;
+    if (wallet) {
+      await warnIfDuplicateWallets(userId, chainType);
+    }
+    return wallet;
   }
-  return wallet;
+
+  const result = await pool.query(
+    `SELECT * FROM wallets WHERE user_id = $1 AND chain = $2 ORDER BY is_primary DESC, created_at ASC LIMIT 1`,
+    [userId, chain]
+  );
+  const wallet = result.rows[0] || null;
+  return normalizeWalletRow(wallet);
 }
 
 export async function getCanonicalWalletByWalletId(walletId) {
   if (!walletId) return null;
 
-  const { data, error } = await supabase
-    .from('wallets')
-    .select('*')
-    .eq('id', walletId)
-    .limit(1)
-    .single();
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('wallets')
+      .select('*')
+      .eq('id', walletId)
+      .limit(1)
+      .single();
 
-  if (error && error.code === 'PGRST116') {
-    return null;
+    if (error && error.code === 'PGRST116') {
+      return null;
+    }
+    throwIfSupabaseError(error, 'getCanonicalWalletByWalletId');
+
+    const wallet = data || null;
+    if (!wallet) return null;
+
+    const canonical = await getCanonicalWallet(wallet.user_id, wallet.chain || 'solana');
+    if (canonical && canonical.id !== wallet.id) {
+      console.error(
+        `Wallet fallback: requested wallet ${wallet.id} but using canonical wallet ${canonical.id} for user ${canonical.user_id}.`
+      );
+    }
+
+    return canonical || wallet;
   }
-  throwIfSupabaseError(error, 'getCanonicalWalletByWalletId');
 
-  const wallet = data || null;
+  const result = await pool.query(`SELECT * FROM wallets WHERE id = $1 LIMIT 1`, [walletId]);
+  const wallet = result.rows[0] || null;
   if (!wallet) return null;
 
   const canonical = await getCanonicalWallet(wallet.user_id, wallet.chain || 'solana');
@@ -72,30 +121,57 @@ export async function getCanonicalWalletByWalletId(walletId) {
     );
   }
 
-  return canonical || wallet;
+  return canonical || normalizeWalletRow(wallet);
 }
 
 export async function getAllCanonicalWallets(chainType = 'solana') {
-  const { data, error } = await supabase
-    .from('wallets')
-    .select('*')
-    .eq('chain', normalizeChain(chainType))
-    .order('user_id', { ascending: true })
-    .order('is_primary', { ascending: false })
-    .order('created_at', { ascending: true });
+  const chain = normalizeChain(chainType);
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('wallets')
+      .select('*')
+      .eq('chain', chain)
+      .order('user_id', { ascending: true })
+      .order('is_primary', { ascending: false })
+      .order('created_at', { ascending: true });
 
-  throwIfSupabaseError(error, 'getAllCanonicalWallets');
+    throwIfSupabaseError(error, 'getAllCanonicalWallets');
 
+    const canonicalByUser = new Map();
+    for (const wallet of data || []) {
+      if (!canonicalByUser.has(wallet.user_id)) {
+        canonicalByUser.set(wallet.user_id, wallet);
+      }
+    }
+
+    for (const row of Array.from(canonicalByUser.values())) {
+      const duplicates = data.filter(
+        (w) => w.user_id === row.user_id && w.chain === chain
+      );
+      if (duplicates.length > 1) {
+        console.warn(
+          `Wallet warning: user ${row.user_id} has ${duplicates.length} wallets for chain ${chainType}. Using canonical wallet only.`
+        );
+      }
+    }
+
+    return Array.from(canonicalByUser.values());
+  }
+
+  const result = await pool.query(
+    `SELECT * FROM wallets WHERE chain = $1 ORDER BY user_id ASC, is_primary DESC, created_at ASC`,
+    [chain]
+  );
   const canonicalByUser = new Map();
-  for (const wallet of data || []) {
+  for (const wallet of result.rows) {
     if (!canonicalByUser.has(wallet.user_id)) {
-      canonicalByUser.set(wallet.user_id, wallet);
+      canonicalByUser.set(wallet.user_id, normalizeWalletRow(wallet));
     }
   }
 
   for (const row of Array.from(canonicalByUser.values())) {
-    const duplicates = data.filter(
-      (w) => w.user_id === row.user_id && w.chain === normalizeChain(chainType)
+    const duplicates = result.rows.filter(
+      (w) => w.user_id === row.user_id && w.chain === chain
     );
     if (duplicates.length > 1) {
       console.warn(

@@ -10,9 +10,8 @@ async function initializeDatabase() {
     console.log("✅ Database connection successful");
 
     // Sync models (creates tables if they don't exist)
-    // Use { alter: true } to alter existing tables (careful in production!)
-    // Use { force: true } to drop and recreate tables (dangerous!)
-    await sequelize.sync({ alter: process.env.NODE_ENV === "development" });
+    // Use { alter: true } to alter existing tables in non-production environments.
+    await sequelize.sync({ alter: process.env.NODE_ENV !== "production" });
     console.log("✅ Database tables synchronized");
 
     // Initialize default data if needed

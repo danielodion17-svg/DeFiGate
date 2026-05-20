@@ -104,17 +104,26 @@ const PORT = process.env.PORT || 5000;
       }
     }
 
-    if (process.env.AUTO_RUN_MIGRATIONS === 'true') {
-      console.log('🛠️ AUTO_RUN_MIGRATIONS enabled, applying database migrations');
+    const shouldAutoRunMigrations = process.env.AUTO_RUN_MIGRATIONS !== 'false' && process.env.NODE_ENV !== 'production';
+    if (shouldAutoRunMigrations) {
+      console.log('🛠️ AUTO_RUN_MIGRATIONS enabled by default in development. Applying database migrations');
       const { default: runMigrations } = await import('./scripts/runMigrations.js');
       const success = await runMigrations();
       if (!success) {
         throw new Error('Database migrations failed during startup');
       }
+    } else {
+      console.log('ℹ️ Skipping database migrations on startup. Set AUTO_RUN_MIGRATIONS=true to enable.');
     }
 
-    await sequelize.sync({ alter: process.env.NODE_ENV === "development" });
-    console.log("✅ Models synced");
+    if (process.env.SEQUELIZE_SYNC === 'true') {
+      const syncOptions = { alter: process.env.NODE_ENV !== 'production' };
+      console.log(`🛠️ Sequelize sync mode: alter=${syncOptions.alter}`);
+      await sequelize.sync(syncOptions);
+      console.log('✅ Models synced');
+    } else {
+      console.log('ℹ️ Sequelize sync skipped. Set SEQUELIZE_SYNC=true to enable model synchronization.');
+    }
 
     await import("./services/depositDetector.js");
     startReconciliationJob({ requestId: `startup-${Date.now()}` });
