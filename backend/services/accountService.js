@@ -34,7 +34,7 @@ async function rpcCall(functionName, params = {}) {
   return data;
 }
 
-async function getOrCreateAccount(userId, asset = DEFAULT_ASSET) {
+export async function getOrCreateAccount(userId, asset = DEFAULT_ASSET) {
   const normalized = normalizeAsset(asset);
   const payload = {
     user_id: userId,
