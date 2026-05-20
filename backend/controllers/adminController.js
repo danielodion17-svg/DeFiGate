@@ -371,6 +371,21 @@ export const migrateLegacyLedger = async (req, res) => {
   }
 };
 
+export const repairWalletEndpoint = async (req, res) => {
+  try {
+    const { walletId } = req.params;
+    if (!walletId) {
+      return respondError(res, 400, 'walletId is required');
+    }
+
+    const result = await repairWalletService(walletId);
+    respondSuccess(res, { result });
+  } catch (error) {
+    console.error('Repair wallet error:', error);
+    respondError(res, 500, 'Failed to repair wallet', true, error.message);
+  }
+};
+
 export const getFinancialIntegrityReport = async (req, res) => {
   try {
     const report = await verifyFinancialIntegrity({ scanBlockchain: req.query.scanBlockchain === 'true' });

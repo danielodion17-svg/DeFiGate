@@ -19,6 +19,7 @@ router.get('/forensic-report', requireRole('admin'), admin.getForensicReport);
 router.post('/archive-duplicate-wallets', requireRole('admin'), admin.archiveDuplicateWalletsController);
 router.post('/backfill-wallet-relations', requireRole('admin'), admin.backfillWalletRelations);
 router.post('/rebuild-balances', requireRole('admin'), admin.rebuildBalances);
+router.post('/repair-wallet/:walletId', requireRole('admin'), admin.repairWalletEndpoint);
 router.post('/scan-wallet-history/:walletId', requireRole('admin'), admin.scanWalletHistory);
 router.post('/migrate-legacy-ledger', requireRole('admin'), admin.migrateLegacyLedger);
 router.get('/financial-integrity-report', requireRole('admin'), admin.getFinancialIntegrityReport);
