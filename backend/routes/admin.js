@@ -15,6 +15,13 @@ router.post('/reconcile/:walletId', requireRole('admin'), admin.reconcileWallet)
 router.post('/deposits/reprocess', requireRole('admin'), admin.reprocessDeposit);
 router.post('/balances/adjust', requireRole('admin'), admin.adjustUserBalance);
 router.get('/audit-logs', requireRole('admin'), admin.getAuditLogsEndpoint);
+router.get('/forensic-report', requireRole('admin'), admin.getForensicReport);
+router.post('/archive-duplicate-wallets', requireRole('admin'), admin.archiveDuplicateWalletsController);
+router.post('/backfill-wallet-relations', requireRole('admin'), admin.backfillWalletRelations);
+router.post('/rebuild-balances', requireRole('admin'), admin.rebuildBalances);
+router.post('/scan-wallet-history/:walletId', requireRole('admin'), admin.scanWalletHistory);
+router.post('/migrate-legacy-ledger', requireRole('admin'), admin.migrateLegacyLedger);
+router.get('/financial-integrity-report', requireRole('admin'), admin.getFinancialIntegrityReport);
 
 // Support-safe operational controls
 router.get('/users', requireSupport, admin.getUsers);

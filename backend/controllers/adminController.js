@@ -2,6 +2,16 @@
 import { runReconciliation, autoRepairSafeMismatches } from '../services/reconciliationService.js';
 import { repairMissingDeposits } from '../services/balanceSyncService.js';
 import { processDeposit } from '../services/depositDetector.js';
+import {
+  generateForensicReport,
+  archiveDuplicateWallets,
+  backfillCanonicalWallets,
+  rebuildBalancesFromLedger,
+  recoverMissingOnchainDeposits,
+  migrateLegacyLedgerEntries,
+  verifyFinancialIntegrity,
+  repairWallet as repairWalletService,
+} from '../services/repairService.js';
 import { approveWithdrawal, rejectWithdrawal, getPendingWithdrawals } from '../services/withdrawalService.js';
 import { Wallet, Transaction, User } from '../models/index.js';
 import { adjustAccount } from '../services/accountService.js';
@@ -296,6 +306,93 @@ export const updateUserRole = async (req, res) => {
   } catch (error) {
     console.error('Update user role error:', error);
     respondError(res, 500, 'Failed to update user role', true, error.message);
+  }
+};
+
+export const getForensicReport = async (req, res) => {
+  try {
+    const report = await generateForensicReport({ scanBlockchain: false });
+    respondSuccess(res, { report });
+  } catch (error) {
+    console.error('Forensic report error:', error);
+    respondError(res, 500, 'Failed to generate forensic report', true, error.message);
+  }
+};
+
+export const archiveDuplicateWalletsController = async (req, res) => {
+  try {
+    const result = await archiveDuplicateWallets();
+    respondSuccess(res, { result });
+  } catch (error) {
+    console.error('Archive duplicate wallets error:', error);
+    respondError(res, 500, 'Failed to archive duplicate wallets', true, error.message);
+  }
+};
+
+export const backfillWalletRelations = async (req, res) => {
+  try {
+    const result = await backfillCanonicalWallets();
+    respondSuccess(res, { result });
+  } catch (error) {
+    console.error('Backfill wallet relations error:', error);
+    respondError(res, 500, 'Failed to backfill wallet relations', true, error.message);
+  }
+};
+
+export const rebuildBalances = async (req, res) => {
+  try {
+    const result = await rebuildBalancesFromLedger();
+    respondSuccess(res, { result });
+  } catch (error) {
+    console.error('Rebuild balances error:', error);
+    respondError(res, 500, 'Failed to rebuild balances', true, error.message);
+  }
+};
+
+export const scanWalletHistory = async (req, res) => {
+  try {
+    const { walletId } = req.params;
+    if (!walletId) return respondError(res, 400, 'walletId is required');
+    const result = await recoverMissingOnchainDeposits({ walletId });
+    respondSuccess(res, { result });
+  } catch (error) {
+    console.error('Scan wallet history error:', error);
+    respondError(res, 500, 'Failed to scan wallet history', true, error.message);
+  }
+};
+
+export const migrateLegacyLedger = async (req, res) => {
+  try {
+    const result = await migrateLegacyLedgerEntries();
+    respondSuccess(res, { result });
+  } catch (error) {
+    console.error('Migrate legacy ledger error:', error);
+    respondError(res, 500, 'Failed to migrate legacy ledger entries', true, error.message);
+  }
+};
+
+export const getFinancialIntegrityReport = async (req, res) => {
+  try {
+    const report = await verifyFinancialIntegrity({ scanBlockchain: req.query.scanBlockchain === 'true' });
+    respondSuccess(res, { report });
+  } catch (error) {
+    console.error('Financial integrity report error:', error);
+    respondError(res, 500, 'Failed to generate financial integrity report', true, error.message);
+  }
+};
+
+export const repairWalletEndpoint = async (req, res) => {
+  try {
+    const { walletId } = req.params;
+    if (!walletId) {
+      return respondError(res, 400, 'walletId is required');
+    }
+
+    const result = await repairWalletService(walletId);
+    respondSuccess(res, { result });
+  } catch (error) {
+    console.error('Repair wallet error:', error);
+    respondError(res, 500, 'Failed to repair wallet', true, error.message);
   }
 };
 

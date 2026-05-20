@@ -48,6 +48,11 @@ CREATE TABLE IF NOT EXISTS wallets (
     address VARCHAR(255),
     chain VARCHAR(255),
     encrypted_private_key TEXT,
+    last_scanned_signature VARCHAR(255),
+    last_scanned_at TIMESTAMP WITH TIME ZONE,
+    is_primary BOOLEAN DEFAULT false,
+    is_archived BOOLEAN DEFAULT false,
+    archived_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -69,9 +74,26 @@ CREATE TABLE IF NOT EXISTS transactions (
     failed_at TIMESTAMP WITH TIME ZONE,
     failure_reason TEXT,
     network_fee DECIMAL(20, 6) DEFAULT 0,
+    reference_id TEXT,
     reference VARCHAR(255),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     CONSTRAINT unique_transaction_hash UNIQUE (tx_hash)
+);
+
+-- Account ledger table
+CREATE TABLE IF NOT EXISTS account_ledger (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    transaction_id UUID NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    wallet_id UUID REFERENCES wallets(id),
+    asset VARCHAR(50) NOT NULL DEFAULT 'USDC',
+    debit_account_id UUID NOT NULL REFERENCES balances(id) ON DELETE CASCADE,
+    credit_account_id UUID NOT NULL REFERENCES balances(id) ON DELETE CASCADE,
+    amount DECIMAL(36, 18) NOT NULL,
+    entry_type VARCHAR(100) NOT NULL DEFAULT 'ledger',
+    reference_id TEXT,
+    metadata JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Ledger entries table
@@ -108,6 +130,27 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_tx_hash ON audit_logs(tx_hash);
+
+-- Archived wallets table
+CREATE TABLE IF NOT EXISTS archived_wallets (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    wallet_id UUID NOT NULL,
+    user_id UUID,
+    provider VARCHAR(255),
+    provider_wallet_id VARCHAR(255),
+    address VARCHAR(255),
+    chain VARCHAR(255),
+    is_primary BOOLEAN DEFAULT false,
+    encrypted_private_key TEXT,
+    created_at TIMESTAMP WITH TIME ZONE,
+    updated_at TIMESTAMP WITH TIME ZONE,
+    archived_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    archived_reason TEXT,
+    metadata JSONB
+);
+
+CREATE INDEX IF NOT EXISTS idx_archived_wallets_wallet_id ON archived_wallets(wallet_id);
+CREATE INDEX IF NOT EXISTS idx_archived_wallets_user_id ON archived_wallets(user_id);
 
 -- Transfers table
 CREATE TABLE IF NOT EXISTS transfers (

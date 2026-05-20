@@ -9,6 +9,10 @@ const AccountLedger = sequelize.define(
       defaultValue: DataTypes.UUIDV4,
       primaryKey: true,
     },
+    transaction_id: {
+      type: DataTypes.UUID,
+      allowNull: false,
+    },
     user_id: {
       type: DataTypes.UUID,
       allowNull: false,
@@ -22,28 +26,40 @@ const AccountLedger = sequelize.define(
       allowNull: false,
       defaultValue: "USDC",
     },
-    type: {
-      type: DataTypes.ENUM("deposit", "withdrawal", "adjustment", "reconciliation"),
+    debit_account_id: {
+      type: DataTypes.UUID,
+      allowNull: false,
+    },
+    credit_account_id: {
+      type: DataTypes.UUID,
       allowNull: false,
     },
     amount: {
-      type: DataTypes.DECIMAL(20, 6),
+      type: DataTypes.DECIMAL(36, 18),
       allowNull: false,
     },
-    tx_hash: {
-      type: DataTypes.TEXT,
+    entry_type: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "ledger",
+    },
+    reference_id: {
+      type: DataTypes.STRING,
       allowNull: true,
     },
     metadata: {
       type: DataTypes.JSONB,
       allowNull: true,
     },
+    created_at: {
+      type: DataTypes.DATE,
+      allowNull: false,
+      defaultValue: DataTypes.NOW,
+    },
   },
   {
     tableName: "account_ledger",
-    timestamps: true,
-    createdAt: "created_at",
-    updatedAt: false,
+    timestamps: false,
   }
 );
 

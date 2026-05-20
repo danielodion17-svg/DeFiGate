@@ -79,6 +79,10 @@ const Transaction = sequelize.define(
       type: DataTypes.DECIMAL(20, 6),
       defaultValue: 0,
     },
+    reference_id: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
     reference: {
       type: DataTypes.STRING,
     },

@@ -1,25 +1,25 @@
 import { DataTypes } from "sequelize";
 import sequelize from "../config/database.js";
 
-const Wallet = sequelize.define(
-  "Wallet",
+const ArchivedWallet = sequelize.define(
+  "ArchivedWallet",
   {
     id: {
       type: DataTypes.UUID,
       defaultValue: DataTypes.UUIDV4,
       primaryKey: true,
     },
-    user_id: {
+    wallet_id: {
       type: DataTypes.UUID,
       allowNull: false,
-      references: {
-        model: "users",
-        key: "id",
-      },
+    },
+    user_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
     },
     provider: {
       type: DataTypes.STRING,
-      allowNull: false,
+      allowNull: true,
     },
     provider_wallet_id: {
       type: DataTypes.STRING,
@@ -33,55 +33,41 @@ const Wallet = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     },
-    encrypted_private_key: {
-      type: DataTypes.TEXT,
-      allowNull: true,
-    },
-    last_scanned_signature: {
-      type: DataTypes.STRING,
-      allowNull: true,
-    },
-    last_scanned_at: {
-      type: DataTypes.DATE,
-      allowNull: true,
-    },
-    last_accessed_at: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW,
-    },
-    last_synced_at: {
-      type: DataTypes.DATE,
-      allowNull: true,
-    },
     is_primary: {
       type: DataTypes.BOOLEAN,
       allowNull: false,
       defaultValue: false,
     },
-    is_archived: {
-      type: DataTypes.BOOLEAN,
-      allowNull: false,
-      defaultValue: false,
+    encrypted_private_key: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    created_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    updated_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
     },
     archived_at: {
       type: DataTypes.DATE,
+      allowNull: false,
+      defaultValue: DataTypes.NOW,
+    },
+    archived_reason: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    metadata: {
+      type: DataTypes.JSONB,
       allowNull: true,
     },
   },
   {
-    tableName: "wallets",
-    timestamps: true,
-    createdAt: "created_at",
-    updatedAt: "updated_at",
-    indexes: [
-      {
-        unique: true,
-        fields: ["user_id", "chain"],
-        name: "wallets_user_chain_unique",
-      },
-    ],
+    tableName: "archived_wallets",
+    timestamps: false,
   }
 );
 
-export default Wallet;
+export default ArchivedWallet;

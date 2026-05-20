@@ -6,6 +6,7 @@ import Transfer from "./Transfer.js";
 import Wallet from "./Wallet.js";
 import LedgerEntry from "./LedgerEntry.js";
 import AccountLedger from "./AccountLedger.js";
+import ArchivedWallet from "./ArchivedWallet.js";
 import AuditLog from "./AuditLog.js";
 
 // ========== ASSOCIATIONS ==========
@@ -26,16 +27,29 @@ Transaction.belongsTo(User, { foreignKey: "user_id" });
 Transaction.hasMany(LedgerEntry, { foreignKey: "transaction_id", onDelete: "CASCADE" });
 LedgerEntry.belongsTo(Transaction, { foreignKey: "transaction_id" });
 
+// Transaction -> AccountLedger (One-to-Many)
+Transaction.hasMany(AccountLedger, { foreignKey: "transaction_id", onDelete: "CASCADE" });
+AccountLedger.belongsTo(Transaction, { foreignKey: "transaction_id" });
+
 // Account -> LedgerEntry (Two roles)
 Account.hasMany(LedgerEntry, { foreignKey: "debit_account_id", as: "debits", onDelete: "CASCADE" });
 Account.hasMany(LedgerEntry, { foreignKey: "credit_account_id", as: "credits", onDelete: "CASCADE" });
 LedgerEntry.belongsTo(Account, { foreignKey: "debit_account_id", as: "debitAccount" });
 LedgerEntry.belongsTo(Account, { foreignKey: "credit_account_id", as: "creditAccount" });
 
-Account.hasMany(AccountLedger, { foreignKey: "user_id", onDelete: "CASCADE" });
-AccountLedger.belongsTo(Account, { foreignKey: "user_id" });
+// Account -> AccountLedger (Two roles)
+Account.hasMany(AccountLedger, { foreignKey: "debit_account_id", as: "ledgerDebits", onDelete: "CASCADE" });
+Account.hasMany(AccountLedger, { foreignKey: "credit_account_id", as: "ledgerCredits", onDelete: "CASCADE" });
+AccountLedger.belongsTo(Account, { foreignKey: "debit_account_id", as: "debitAccount" });
+AccountLedger.belongsTo(Account, { foreignKey: "credit_account_id", as: "creditAccount" });
+
+// Wallet -> AccountLedger
 Wallet.hasMany(AccountLedger, { foreignKey: "wallet_id", onDelete: "SET NULL" });
 AccountLedger.belongsTo(Wallet, { foreignKey: "wallet_id" });
+
+// User -> AccountLedger
+User.hasMany(AccountLedger, { foreignKey: "user_id", onDelete: "CASCADE" });
+AccountLedger.belongsTo(User, { foreignKey: "user_id" });
 
 // User -> Transfer (One-to-Many) - Sender
 User.hasMany(Transfer, { 
@@ -59,4 +73,4 @@ Transfer.belongsTo(User, {
   as: "receiver" 
 });
 
-export { sequelize, User, Account, Transaction, Transfer, Wallet, LedgerEntry, AccountLedger, AuditLog };
+export { sequelize, User, Account, Transaction, Transfer, Wallet, LedgerEntry, AccountLedger, ArchivedWallet, AuditLog };
