@@ -2,7 +2,7 @@ import bcrypt from "bcrypt";
 import crypto from "crypto";
 import pool from "../db.js";
 import { generateToken } from "../middleware/auth.js";
-import { getCanonicalWallet } from "./walletController.js";
+import { getCanonicalWallet } from "../services/walletService.js";
 import { sendVerificationEmail } from "../services/emailService.js";
 import { respondError, respondSuccess } from "../utils/response.js";
 import Transaction from "../models/Transaction.js";
