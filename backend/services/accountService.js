@@ -1,4 +1,4 @@
-import { supabase } from '../config/supabase.js';
+import { supabase as supabaseDefault, supabaseAnonClient, supabaseServiceClient, requireServiceClient } from '../config/supabase.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 
 const DEFAULT_ASSET = 'USDC';
@@ -27,7 +27,8 @@ function normalizeAmount(amount, asset = DEFAULT_ASSET) {
 }
 
 async function rpcCall(functionName, params = {}) {
-  const { data, error } = await supabase.rpc(functionName, params);
+  const svc = requireServiceClient(`RPC ${functionName}`);
+  const { data, error } = await svc.rpc(functionName, params);
   if (error) {
     throw new Error(error.message || `RPC ${functionName} failed`);
   }
@@ -46,7 +47,8 @@ export async function getOrCreateAccount(userId, asset = DEFAULT_ASSET) {
     updated_at: new Date().toISOString(),
   };
 
-  const { data, error } = await supabase
+  const svc = requireServiceClient('getOrCreateAccount upsert');
+  const { data, error } = await svc
     .from('balances')
     .upsert(payload, { onConflict: ['user_id', 'asset'] })
     .select('*')
@@ -60,7 +62,9 @@ export async function getOrCreateAccount(userId, asset = DEFAULT_ASSET) {
 
 async function getRawDerivedBalance(userId, asset = DEFAULT_ASSET) {
   const normalized = normalizeAsset(asset);
-  const { data, error } = await supabase
+  const readClient = supabaseAnonClient || supabaseServiceClient;
+  if (!readClient) throw new Error('Supabase client not configured for reads');
+  const { data, error } = await readClient
     .from('account_ledger')
     .select('amount', { count: 'exact' })
     .eq('user_id', userId)
@@ -84,7 +88,8 @@ async function syncAccountCache(userId, asset = DEFAULT_ASSET) {
 
   if (Math.abs(cachedBalance - derivedBalance) > 0.000001) {
     const updatePayload = { available_balance: derivedBalance, updated_at: new Date().toISOString() };
-    const { error } = await supabase
+    const svc = requireServiceClient('syncAccountCache update');
+    const { error } = await svc
       .from('balances')
       .update(updatePayload)
       .match({ user_id: userId, asset: normalizeAsset(asset) });
@@ -229,7 +234,8 @@ export async function freezeAccount(userId, asset = DEFAULT_ASSET, reason = 'sys
     updated_at: new Date().toISOString(),
   };
 
-  const { error } = await supabase
+  const svc = requireServiceClient('freezeAccount update');
+  const { error } = await svc
     .from('balances')
     .update(update)
     .match({ user_id: userId, asset: normalizeAsset(asset) });

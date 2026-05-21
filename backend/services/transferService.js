@@ -1,4 +1,4 @@
-import { supabase } from '../config/supabase.js';
+import { supabase as supabaseDefault, supabaseAnonClient, supabaseServiceClient, requireServiceClient } from '../config/supabase.js';
 
 const DEFAULT_ASSET = 'USDC';
 const AMOUNT_REGEX = /^\d+(?:\.\d{1,6})?$/;
@@ -15,7 +15,8 @@ function normalizeAmount(amount) {
 }
 
 async function rpcCall(functionName, params = {}) {
-  const { data, error } = await supabase.rpc(functionName, params);
+  const svc = requireServiceClient(`RPC ${functionName}`);
+  const { data, error } = await svc.rpc(functionName, params);
   if (error) {
     throw new Error(error.message || `RPC ${functionName} failed`);
   }
@@ -36,7 +37,9 @@ export async function transferFunds(senderId, receiverId, amount, options = {}) 
   const amountString = normalizeAmount(amount);
 
   if (reference) {
-    const { data: existingTx, error: queryErr } = await supabase
+    const readClient = supabaseAnonClient || supabaseServiceClient;
+    if (!readClient) throw new Error('Supabase client not configured for reads');
+    const { data: existingTx, error: queryErr } = await readClient
       .from('transactions')
       .select('*')
       .eq('user_id', senderId)
@@ -53,7 +56,8 @@ export async function transferFunds(senderId, receiverId, amount, options = {}) 
     }
   }
 
-  const { data: createdTx, error: createErr } = await supabase
+  const svc = requireServiceClient('create transaction');
+  const { data: createdTx, error: createErr } = await svc
     .from('transactions')
     .insert([
       {
@@ -93,14 +97,21 @@ export async function transferFunds(senderId, receiverId, amount, options = {}) 
       p_transaction_id: transactionRecord.id,
     });
 
-    await supabase
+    const svc2 = requireServiceClient('update transaction status');
+    await svc2
       .from('transactions')
       .update({ status: 'completed', confirmed_at: new Date().toISOString() })
       .eq('id', transactionRecord.id);
 
     return transactionRecord;
   } catch (error) {
-    await supabase.from('transactions').update({ status: 'failed' }).eq('id', transactionRecord.id);
+    try {
+      const svc3 = requireServiceClient('mark transaction failed');
+      await svc3.from('transactions').update({ status: 'failed' }).eq('id', transactionRecord.id);
+    } catch (e) {
+      // If we can't mark failed due to missing service key, log and continue throwing original error.
+      console.warn('Unable to mark transaction failed in Supabase:', e.message || e);
+    }
     throw error;
   }
 }

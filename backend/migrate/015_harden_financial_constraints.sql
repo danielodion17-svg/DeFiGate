@@ -31,15 +31,42 @@ BEFORE UPDATE OR DELETE ON audit_logs
 FOR EACH ROW EXECUTE FUNCTION prevent_update_or_delete_audit_logs();
 
 -- Enforce foreign key integrity on audit log references explicitly
-ALTER TABLE audit_logs
-  ADD CONSTRAINT IF NOT EXISTS fk_audit_logs_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
-  ADD CONSTRAINT IF NOT EXISTS fk_audit_logs_wallet FOREIGN KEY (wallet_id) REFERENCES wallets(id) ON DELETE SET NULL,
-  ADD CONSTRAINT IF NOT EXISTS fk_audit_logs_transaction FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE SET NULL;
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints
+    WHERE constraint_name = 'fk_audit_logs_user' AND table_name = 'audit_logs'
+  ) THEN
+    ALTER TABLE audit_logs ADD CONSTRAINT fk_audit_logs_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints
+    WHERE constraint_name = 'fk_audit_logs_wallet' AND table_name = 'audit_logs'
+  ) THEN
+    ALTER TABLE audit_logs ADD CONSTRAINT fk_audit_logs_wallet FOREIGN KEY (wallet_id) REFERENCES wallets(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints
+    WHERE constraint_name = 'fk_audit_logs_transaction' AND table_name = 'audit_logs'
+  ) THEN
+    ALTER TABLE audit_logs ADD CONSTRAINT fk_audit_logs_transaction FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE SET NULL;
+  END IF;
+END $$;
 
 -- Add foreign key support for account_ledger to balances
-ALTER TABLE account_ledger
-  ADD CONSTRAINT IF NOT EXISTS fk_account_ledger_debit_balance FOREIGN KEY (debit_account_id) REFERENCES balances(id) ON DELETE CASCADE,
-  ADD CONSTRAINT IF NOT EXISTS fk_account_ledger_credit_balance FOREIGN KEY (credit_account_id) REFERENCES balances(id) ON DELETE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints
+    WHERE constraint_name = 'fk_account_ledger_debit_balance' AND table_name = 'account_ledger'
+  ) THEN
+    ALTER TABLE account_ledger ADD CONSTRAINT fk_account_ledger_debit_balance FOREIGN KEY (debit_account_id) REFERENCES balances(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints
+    WHERE constraint_name = 'fk_account_ledger_credit_balance' AND table_name = 'account_ledger'
+  ) THEN
+    ALTER TABLE account_ledger ADD CONSTRAINT fk_account_ledger_credit_balance FOREIGN KEY (credit_account_id) REFERENCES balances(id) ON DELETE CASCADE;
+  END IF;
+END $$;
 
 -- Ensure transaction reference_id uniqueness protection
 DO $$ BEGIN

@@ -10,15 +10,29 @@ ALTER TABLE account_ledger
   ADD COLUMN IF NOT EXISTS transfer_id UUID;
 
 -- Allow reserve/release ledger entry types.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_name = 'account_ledger'
+      AND column_name = 'entry_type'
+      AND udt_name = 'enum_account_ledger_type'
+  ) THEN
+    ALTER TABLE account_ledger
+      ALTER COLUMN entry_type TYPE VARCHAR(100) USING entry_type::text;
+  END IF;
+END $$;
+
 ALTER TABLE account_ledger DROP CONSTRAINT IF EXISTS account_ledger_type_check;
 ALTER TABLE account_ledger
   ADD CONSTRAINT account_ledger_type_check
-  CHECK (type IN ('deposit', 'withdrawal', 'adjustment', 'reconciliation', 'reserve', 'release'));
+  CHECK (entry_type IN ('deposit', 'withdrawal', 'adjustment', 'reconciliation', 'reserve', 'release'));
 
 -- Idempotency and concurrency-safe indexes for ledger entries.
 CREATE UNIQUE INDEX IF NOT EXISTS ux_account_ledger_tx_hash_asset ON account_ledger(tx_hash, asset) WHERE tx_hash IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS ux_account_ledger_reference_id ON account_ledger(reference_id) WHERE reference_id IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS ux_account_ledger_transfer_user_type ON account_ledger(transfer_id, user_id, type) WHERE transfer_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_account_ledger_transfer_user_type ON account_ledger(transfer_id, user_id, entry_type) WHERE transfer_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_account_ledger_transfer_id ON account_ledger(transfer_id);
 CREATE INDEX IF NOT EXISTS idx_account_ledger_reference_id ON account_ledger(reference_id);
 
@@ -77,7 +91,7 @@ BEGIN
   WHERE id = account_row.id;
 
   INSERT INTO account_ledger(
-    user_id, wallet_id, asset, type, amount,
+    user_id, wallet_id, asset, entry_type, amount,
     tx_hash, reference_id, transfer_id, metadata, created_at
   ) VALUES (
     p_user_id, p_wallet_id, normalized_asset, 'deposit', p_amount,
@@ -136,7 +150,7 @@ BEGIN
   WHERE id = account_row.id;
 
   INSERT INTO account_ledger(
-    user_id, wallet_id, asset, type, amount,
+    user_id, wallet_id, asset, entry_type, amount,
     tx_hash, reference_id, transfer_id, metadata, created_at
   ) VALUES (
     p_user_id, p_wallet_id, normalized_asset, 'withdrawal', -p_amount,
@@ -195,7 +209,7 @@ BEGIN
   WHERE id = account_row.id;
 
   INSERT INTO account_ledger(
-    user_id, wallet_id, asset, type, amount,
+    user_id, wallet_id, asset, entry_type, amount,
     tx_hash, reference_id, transfer_id, metadata, created_at
   ) VALUES (
     p_user_id, p_wallet_id, normalized_asset, 'adjustment', p_amount,
@@ -252,7 +266,7 @@ BEGIN
   WHERE id = account_row.id;
 
   INSERT INTO account_ledger(
-    user_id, asset, type, amount, metadata, created_at
+    user_id, asset, entry_type, amount, metadata, created_at
   ) VALUES (
     p_user_id, normalized_asset, 'reserve', -p_amount, p_metadata, NOW()
   ) RETURNING * INTO ledger_row;
@@ -307,7 +321,7 @@ BEGIN
   WHERE id = account_row.id;
 
   INSERT INTO account_ledger(
-    user_id, asset, type, amount, metadata, created_at
+    user_id, asset, entry_type, amount, metadata, created_at
   ) VALUES (
     p_user_id, normalized_asset, 'release', p_amount, p_metadata, NOW()
   ) RETURNING * INTO ledger_row;
@@ -364,7 +378,7 @@ BEGIN
   WHERE id = account_row.id;
 
   INSERT INTO account_ledger(
-    user_id, wallet_id, asset, type, amount,
+    user_id, wallet_id, asset, entry_type, amount,
     tx_hash, reference_id, transfer_id, metadata, created_at
   ) VALUES (
     p_user_id, p_wallet_id, normalized_asset, 'withdrawal', -p_amount,
@@ -469,7 +483,7 @@ BEGIN
   WHERE id = receiver_account.id;
 
   INSERT INTO account_ledger(
-    user_id, wallet_id, asset, type, amount,
+    user_id, wallet_id, asset, entry_type, amount,
     tx_hash, reference_id, transfer_id, metadata, created_at
   ) VALUES (
     p_sender_id, p_wallet_id, normalized_asset, 'withdrawal', -p_amount,
@@ -477,7 +491,7 @@ BEGIN
   ) RETURNING * INTO debit_row;
 
   INSERT INTO account_ledger(
-    user_id, wallet_id, asset, type, amount,
+    user_id, wallet_id, asset, entry_type, amount,
     tx_hash, reference_id, transfer_id, metadata, created_at
   ) VALUES (
     p_receiver_id, p_wallet_id, normalized_asset, 'deposit', p_amount,

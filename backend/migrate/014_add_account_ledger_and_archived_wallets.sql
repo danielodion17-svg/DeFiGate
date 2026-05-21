@@ -36,6 +36,36 @@ CREATE TABLE IF NOT EXISTS account_ledger (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_name = 'account_ledger'
+      AND column_name = 'type'
+  ) AND NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_name = 'account_ledger'
+      AND column_name = 'entry_type'
+  ) THEN
+    ALTER TABLE account_ledger RENAME COLUMN type TO entry_type;
+  END IF;
+END$$;
+
+ALTER TABLE account_ledger
+  ADD COLUMN IF NOT EXISTS transaction_id UUID REFERENCES transactions(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS wallet_id UUID REFERENCES wallets(id),
+  ADD COLUMN IF NOT EXISTS asset VARCHAR(50) NOT NULL DEFAULT 'USDC',
+  ADD COLUMN IF NOT EXISTS debit_account_id UUID REFERENCES balances(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS credit_account_id UUID REFERENCES balances(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS amount DECIMAL(36, 18) NOT NULL,
+  ADD COLUMN IF NOT EXISTS entry_type VARCHAR(100) NOT NULL DEFAULT 'ledger',
+  ADD COLUMN IF NOT EXISTS reference_id TEXT,
+  ADD COLUMN IF NOT EXISTS metadata JSONB,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
 CREATE INDEX IF NOT EXISTS idx_account_ledger_transaction ON account_ledger(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_account_ledger_user ON account_ledger(user_id);
 CREATE INDEX IF NOT EXISTS idx_account_ledger_wallet ON account_ledger(wallet_id);
