@@ -30,21 +30,26 @@ const app = express();
 const hasDatabaseUrl = Boolean(
   process.env.SUPABASE_DATABASE_URL || process.env.DATABASE_URL || process.env.LOCAL_DATABASE_URL
 );
-const hasSupabaseApi = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+const hasSupabaseUrl = Boolean(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL);
+const hasSupabaseServiceKey = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-if (!hasDatabaseUrl && !hasSupabaseApi) {
+if (!hasDatabaseUrl && !hasSupabaseUrl) {
   console.error(
     "❌ Missing database configuration. Set SUPABASE_DATABASE_URL or DATABASE_URL (and optionally SUPABASE_URL with SUPABASE_SERVICE_ROLE_KEY for Supabase JS client access)."
   );
   process.exit(1);
 }
 
-// In production require Supabase service role key for server-side operations
-if (process.env.NODE_ENV === 'production') {
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    console.error('❌ In production, SUPABASE_SERVICE_ROLE_KEY must be set for secure Supabase access');
-    process.exit(1);
-  }
+if (hasSupabaseUrl && !hasSupabaseServiceKey) {
+  console.warn(
+    '⚠️ SUPABASE_SERVICE_ROLE_KEY not set. Supabase admin/write operations will be disabled; read-only access may still work if anon keys are configured.'
+  );
+}
+
+if (process.env.NODE_ENV === 'production' && !hasSupabaseServiceKey) {
+  console.warn(
+    '⚠️ Running in production without SUPABASE_SERVICE_ROLE_KEY. Service-role protected Supabase operations will fail at runtime with controlled errors.'
+  );
 }
 
 // ======================
@@ -96,7 +101,7 @@ const PORT = process.env.PORT || 5000;
   try {
     await sequelize.authenticate();
     console.log("✅ Database connected");
-    if (hasSupabaseApi) {
+    if (hasSupabaseUrl) {
       const { supabase } = await import('./config/supabase.js');
       // Trigger Supabase client initialization and verification during startup.
       if (supabase) {

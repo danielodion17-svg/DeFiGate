@@ -1,4 +1,4 @@
-import { supabase as supabaseDefault, supabaseAnonClient, supabaseServiceClient, requireServiceClient } from '../config/supabase.js';
+import { supabase as supabaseDefault, supabaseAnonClient, supabaseServiceClient, requireServiceClient, hasServiceClient } from '../config/supabase.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 
 const DEFAULT_ASSET = 'USDC';
@@ -47,17 +47,36 @@ export async function getOrCreateAccount(userId, asset = DEFAULT_ASSET) {
     updated_at: new Date().toISOString(),
   };
 
-  const svc = requireServiceClient('getOrCreateAccount upsert');
-  const { data, error } = await svc
-    .from('balances')
-    .upsert(payload, { onConflict: ['user_id', 'asset'] })
-    .select('*')
-    .limit(1);
+  try {
+    const svc = requireServiceClient('getOrCreateAccount upsert');
+    const { data, error } = await svc
+      .from('balances')
+      .upsert(payload, { onConflict: ['user_id', 'asset'] })
+      .select('*')
+      .limit(1);
 
-  if (error) {
-    throw new Error(error.message || 'Failed to get or create account');
+    if (error) {
+      throw new Error(error.message || 'Failed to get or create account');
+    }
+    return (data && data[0]) || null;
+  } catch (err) {
+    // Service client missing or write failed — fall back to read-only lookup via anon client if available
+    console.warn('getOrCreateAccount: service client unavailable or upsert failed, attempting read-only fallback', err?.message || err);
+    const readClient = supabaseAnonClient || supabaseServiceClient;
+    if (!readClient) {
+      return null;
+    }
+    const { data, error } = await readClient
+      .from('balances')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('asset', normalized)
+      .limit(1);
+    if (error) {
+      throw new Error(error.message || 'Failed to read account in fallback');
+    }
+    return (data && data[0]) || null;
   }
-  return (data && data[0]) || null;
 }
 
 async function getRawDerivedBalance(userId, asset = DEFAULT_ASSET) {
@@ -83,31 +102,44 @@ async function getRawDerivedBalance(userId, asset = DEFAULT_ASSET) {
 
 async function syncAccountCache(userId, asset = DEFAULT_ASSET) {
   const derivedBalance = await getRawDerivedBalance(userId, asset);
-  const account = await getOrCreateAccount(userId, asset);
-  const cachedBalance = parseFloat(account.available_balance || 0);
+  let account = null;
+  try {
+    account = await getOrCreateAccount(userId, asset);
+  } catch (err) {
+    console.warn('syncAccountCache: getOrCreateAccount failed, proceeding with derived balance only', err?.message || err);
+  }
+  const cachedBalance = parseFloat((account && account.available_balance) || 0);
+
+  if (!hasServiceClient()) {
+    return derivedBalance;
+  }
 
   if (Math.abs(cachedBalance - derivedBalance) > 0.000001) {
     const updatePayload = { available_balance: derivedBalance, updated_at: new Date().toISOString() };
-    const svc = requireServiceClient('syncAccountCache update');
-    const { error } = await svc
-      .from('balances')
-      .update(updatePayload)
-      .match({ user_id: userId, asset: normalizeAsset(asset) });
+    try {
+      const svc = requireServiceClient('syncAccountCache update');
+      const { error } = await svc
+        .from('balances')
+        .update(updatePayload)
+        .match({ user_id: userId, asset: normalizeAsset(asset) });
 
-    if (error) {
-      throw new Error(error.message || 'Failed to update account cache');
+      if (error) {
+        throw new Error(error.message || 'Failed to update account cache');
+      }
+
+      await logAuditEvent(AUDIT_ACTIONS.RECONCILIATION_MISMATCH, {
+        user_id: userId,
+        wallet_id: account ? account.id : null,
+        amount: (derivedBalance - cachedBalance).toString(),
+        asset: normalizeAsset(asset),
+        metadata: {
+          derived_balance: derivedBalance,
+          cached_balance: cachedBalance,
+        },
+      });
+    } catch (err) {
+      console.warn('syncAccountCache: unable to persist cache update, skipping:', err?.message || err);
     }
-
-    await logAuditEvent(AUDIT_ACTIONS.RECONCILIATION_MISMATCH, {
-      user_id: userId,
-      wallet_id: account.id,
-      amount: (derivedBalance - cachedBalance).toString(),
-      asset: normalizeAsset(asset),
-      metadata: {
-        derived_balance: derivedBalance,
-        cached_balance: cachedBalance,
-      },
-    });
   }
 
   return derivedBalance;
@@ -162,8 +194,17 @@ async function addLedgerEntry({
 }
 
 export async function getDerivedBalance(userId, asset = DEFAULT_ASSET) {
-  const balance = await syncAccountCache(userId, asset);
-  return balance;
+  try {
+    const derived = await getRawDerivedBalance(userId, asset);
+    // best-effort cache sync in background; don't block or fail the request
+    if (hasServiceClient()) {
+      syncAccountCache(userId, asset).catch((e) => console.warn('background syncAccountCache failed', e?.message || e));
+    }
+    return derived;
+  } catch (err) {
+    console.error('getDerivedBalance error', err);
+    return 0;
+  }
 }
 
 export async function creditAccount(userId, amount, options = {}) {
