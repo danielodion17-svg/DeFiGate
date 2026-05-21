@@ -77,8 +77,13 @@ const Wallet = sequelize.define(
     indexes: [
       {
         unique: true,
-        fields: ["user_id", "chain"],
-        name: "wallets_user_chain_unique",
+        fields: ["user_id"],
+        name: "wallets_user_id_unique",
+      },
+      {
+        unique: true,
+        fields: ["address"],
+        name: "wallets_address_unique",
       },
     ],
   }

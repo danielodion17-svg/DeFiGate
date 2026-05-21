@@ -54,7 +54,9 @@ CREATE TABLE IF NOT EXISTS wallets (
     is_archived BOOLEAN DEFAULT false,
     archived_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT wallets_user_id_unique UNIQUE (user_id),
+    CONSTRAINT wallets_address_unique UNIQUE (address)
 );
 
 -- Transactions table

@@ -1,7 +1,8 @@
 import React from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 
 const AdminPortal = ({ user }) => {
+  const navigate = useNavigate();
   if (!user) {
     return (
       <div className="admin-access-panel">
@@ -63,7 +64,12 @@ const AdminPortal = ({ user }) => {
                 <span className="tag">Dashboard</span>
                 <span className="tag">Users</span>
                 <span className="tag">Withdrawals</span>
+                {user.role === 'admin' && <span className="tag">Audit</span>}
               </div>
+            </div>
+            <div className="admin-action-card admin-action-portal-switch">
+              <strong>Quick switch</strong>
+              <button className="btn btn-secondary full-width" onClick={() => navigate('/')}>Return to User Portal</button>
             </div>
           </div>
         </div>

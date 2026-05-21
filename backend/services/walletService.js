@@ -81,6 +81,86 @@ export async function getCanonicalWallet(userId, chainType = 'solana') {
   return normalizeWalletRow(wallet);
 }
 
+export async function getOrCreateWallet(userId, chainType = 'solana', walletData = null) {
+  if (!userId) return null;
+  const chain = normalizeChain(chainType);
+  const existingWallet = await getCanonicalWallet(userId, chain);
+  if (existingWallet) {
+    // Preserve the existing wallet row and do not recreate.
+    return existingWallet;
+  }
+
+  if (!walletData || !walletData.address) {
+    return null;
+  }
+
+  const address = String(
+    walletData.address || walletData?.accounts?.[0]?.address || ''
+  ).trim();
+  if (!address) {
+    return null;
+  }
+
+  const provider = walletData.provider || 'privy';
+  const providerWalletId = walletData.id || walletData.provider_wallet_id || null;
+  const encryptedPrivateKey = walletData.encrypted_private_key || null;
+  const now = new Date().toISOString();
+
+  const insertQuery = `
+    INSERT INTO wallets (
+      user_id,
+      provider,
+      provider_wallet_id,
+      address,
+      chain,
+      encrypted_private_key,
+      last_accessed_at,
+      is_primary,
+      is_archived,
+      created_at,
+      updated_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, true, false, $8, $8)
+    ON CONFLICT (user_id) DO NOTHING
+    RETURNING *;
+  `;
+
+  const result = await pool.query(insertQuery, [
+    userId,
+    provider,
+    providerWalletId,
+    address,
+    chain,
+    encryptedPrivateKey,
+    now,
+    now,
+  ]);
+
+  if (result.rows.length > 0) {
+    return normalizeWalletRow(result.rows[0]);
+  }
+
+  // If the insert did nothing because a wallet already exists for this user,
+  // return the existing canonical wallet for the user regardless of chain.
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('wallets')
+      .select('*')
+      .eq('user_id', userId)
+      .order('is_primary', { ascending: false })
+      .order('created_at', { ascending: true })
+      .limit(1);
+
+    throwIfSupabaseError(error, 'getOrCreateWalletFallback');
+    return (data && data[0]) || null;
+  }
+
+  const fallbackResult = await pool.query(
+    `SELECT * FROM wallets WHERE user_id = $1 ORDER BY is_primary DESC, created_at ASC LIMIT 1`,
+    [userId]
+  );
+  return normalizeWalletRow(fallbackResult.rows[0] || null);
+}
+
 export async function getCanonicalWalletByWalletId(walletId) {
   if (!walletId) return null;
 

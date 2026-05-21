@@ -15,6 +15,7 @@ import {
   getCanonicalWallet,
   getCanonicalWalletByWalletId,
   getAllCanonicalWallets,
+  getOrCreateWallet,
 } from "../services/walletService.js";
 import {
   getAssociatedTokenAddress,
@@ -71,134 +72,6 @@ async function getWalletByUserId(userId) {
   return getCanonicalWallet(userId, "solana");
 }
 
-async function getWalletByUserIdAndChain(userId, chainType) {
-  return getCanonicalWallet(userId, chainType);
-}
-
-async function saveWallet(userId, privyWallet, chainType = "solana") {
-  const existing = await getCanonicalWallet(userId, chainType);
-  if (existing) {
-    return existing;
-  }
-
-  const providerWalletId = privyWallet.id || null;
-  const address =
-    (privyWallet.accounts && privyWallet.accounts[0]?.address) ||
-    privyWallet.address ||
-    null;
-
-  try {
-    try {
-      const svc = requireServiceClient('saveWallet insert');
-      const { data, error } = await svc
-        .from('wallets')
-        .insert([
-          {
-            user_id: userId,
-            provider: 'privy',
-            provider_wallet_id: providerWalletId,
-            address,
-            chain: chainType,
-            encrypted_private_key: null,
-            is_primary: true,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          },
-        ])
-        .select('*');
-
-      if (error) {
-        console.error('saveWallet error', error.message || error);
-        return await getCanonicalWallet(userId, chainType);
-      }
-      if (data && data[0]) {
-        return data[0];
-      }
-      return await getCanonicalWallet(userId, chainType);
-    } catch (err) {
-      console.error('saveWallet error', err?.message || err);
-      return await getCanonicalWallet(userId, chainType);
-    }
-  } catch (error) {
-    console.error("saveWallet error", error?.message || error);
-    return await getCanonicalWallet(userId, chainType);
-  }
-}
-
-export async function ensureUserWallet(userId, email, chainType = "solana") {
-  if (!userId || !email) {
-    throw new Error("Missing user ID or email for wallet creation");
-  }
-
-  if (chainType !== "solana") {
-    throw new Error("Only Solana wallets are supported");
-  }
-
-  const key = `${userId}:${chainType}`;
-
-  // Try DB first if configured
-  if (process.env.DATABASE_URL) {
-    try {
-      const existing = await getWalletByUserId(userId);
-      if (existing) {
-        try {
-          const svc = requireServiceClient('ensureUserWallet update last_accessed_at');
-          await svc
-            .from('wallets')
-            .update({ last_accessed_at: new Date().toISOString() })
-            .eq('id', existing.id);
-        } catch (e) {
-          console.warn('Unable to update last_accessed_at in Supabase:', e.message || e);
-        }
-
-        await logAuditEvent(AUDIT_ACTIONS.WALLET_REUSED, {
-          user_id: userId,
-          wallet_id: existing.id,
-          asset: chainType,
-          metadata: {
-            provider: existing.provider,
-            provider_wallet_id: existing.provider_wallet_id,
-            wallet_address: existing.address,
-          },
-          request_id: `wallet_access_${Date.now()}`,
-        });
-
-        return { ...existing, status: "connected", last_accessed_at: new Date().toISOString() };
-      }
-
-      // Do not auto-create wallets here. Only existing canonical wallets are reused.
-      return {
-        id: key,
-        user_id: userId,
-        provider: "none",
-        provider_wallet_id: null,
-        address: null,
-        chain: chainType,
-        status: "disconnected",
-        created_at: new Date().toISOString(),
-      };
-    } catch (err) {
-      console.error("DB wallet error, falling back to in-memory", err?.message || err);
-    }
-  }
-
-  // In-memory fallback
-  if (inMemoryWallets.has(key)) {
-    return inMemoryWallets.get(key);
-  }
-
-  return {
-    id: key,
-    user_id: userId,
-    provider: "none",
-    provider_wallet_id: null,
-    address: null,
-    chain: chainType,
-    status: "disconnected",
-    created_at: new Date().toISOString(),
-  };
-}
-
 // POST /wallet/create — create a server-side wallet via Privy
 export const createEmbeddedWallet = async (req, res) => {
   const userId = req.user?.id || req.body.userId;
@@ -213,7 +86,6 @@ export const createEmbeddedWallet = async (req, res) => {
   }
 
   try {
-    const key = `${userId}:${chainType}`;
     const existing = await getWalletByUserId(userId);
     if (existing) {
       return res.json({ ok: true, data: existing });
@@ -223,7 +95,7 @@ export const createEmbeddedWallet = async (req, res) => {
       return res.json({
         ok: true,
         data: {
-          id: key,
+          id: `${userId}:${chainType}`,
           user_id: userId,
           provider: 'local',
           provider_wallet_id: null,
@@ -236,7 +108,16 @@ export const createEmbeddedWallet = async (req, res) => {
     }
 
     const privyWallet = await createPrivyWallet(chainType);
-    const wallet = await saveWallet(userId, privyWallet, chainType);
+    const wallet = await getOrCreateWallet(userId, chainType, {
+      provider: 'privy',
+      provider_wallet_id: privyWallet.id,
+      address: privyWallet.accounts?.[0]?.address || privyWallet.address,
+      encrypted_private_key: null,
+    });
+
+    if (!wallet) {
+      return res.status(500).json({ ok: false, error: 'Failed to create wallet' });
+    }
 
     await logAuditEvent(AUDIT_ACTIONS.WALLET_CREATED, {
       user_id: userId,
