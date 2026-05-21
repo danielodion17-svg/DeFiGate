@@ -1,6 +1,6 @@
 import axios from "axios";
 import dotenv from "dotenv";
-import { supabase } from "../config/supabase.js";
+import { supabase as supabaseDefault, supabaseAnonClient, supabaseServiceClient, requireServiceClient } from "../config/supabase.js";
 import {
   Connection,
   PublicKey,
@@ -88,31 +88,37 @@ async function saveWallet(userId, privyWallet, chainType = "solana") {
     null;
 
   try {
-    const { data, error } = await supabase
-      .from('wallets')
-      .insert([
-        {
-          user_id: userId,
-          provider: 'privy',
-          provider_wallet_id: providerWalletId,
-          address,
-          chain: chainType,
-          encrypted_private_key: null,
-          is_primary: true,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-      ])
-      .select('*');
+    try {
+      const svc = requireServiceClient('saveWallet insert');
+      const { data, error } = await svc
+        .from('wallets')
+        .insert([
+          {
+            user_id: userId,
+            provider: 'privy',
+            provider_wallet_id: providerWalletId,
+            address,
+            chain: chainType,
+            encrypted_private_key: null,
+            is_primary: true,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+        ])
+        .select('*');
 
-    if (error) {
-      console.error('saveWallet error', error.message || error);
+      if (error) {
+        console.error('saveWallet error', error.message || error);
+        return await getCanonicalWallet(userId, chainType);
+      }
+      if (data && data[0]) {
+        return data[0];
+      }
+      return await getCanonicalWallet(userId, chainType);
+    } catch (err) {
+      console.error('saveWallet error', err?.message || err);
       return await getCanonicalWallet(userId, chainType);
     }
-    if (data && data[0]) {
-      return data[0];
-    }
-    return await getCanonicalWallet(userId, chainType);
   } catch (error) {
     console.error("saveWallet error", error?.message || error);
     return await getCanonicalWallet(userId, chainType);
@@ -135,10 +141,15 @@ export async function ensureUserWallet(userId, email, chainType = "solana") {
     try {
       const existing = await getWalletByUserId(userId);
       if (existing) {
-        await supabase
-          .from('wallets')
-          .update({ last_accessed_at: new Date().toISOString() })
-          .eq('id', existing.id);
+        try {
+          const svc = requireServiceClient('ensureUserWallet update last_accessed_at');
+          await svc
+            .from('wallets')
+            .update({ last_accessed_at: new Date().toISOString() })
+            .eq('id', existing.id);
+        } catch (e) {
+          console.warn('Unable to update last_accessed_at in Supabase:', e.message || e);
+        }
 
         await logAuditEvent(AUDIT_ACTIONS.WALLET_REUSED, {
           user_id: userId,
@@ -252,7 +263,12 @@ export const createEmbeddedWallet = async (req, res) => {
 
 // POST /wallet/send — sign and broadcast a transaction via Privy
 async function resolvePrivyWalletId(walletId) {
-  const { data, error } = await supabase
+  const readClient = supabaseAnonClient || supabaseServiceClient;
+  if (!readClient) {
+    console.error('Supabase client not available for resolvePrivyWalletId');
+    return null;
+  }
+  const { data, error } = await readClient
     .from('wallets')
     .select('provider_wallet_id')
     .or(`id.eq.${walletId},provider_wallet_id.eq.${walletId}`)
@@ -473,10 +489,15 @@ export const getWalletBalances = async (req, res) => {
     }
 
     const balanceResult = await syncWalletBalances(wallet);
-    await supabase
-      .from('wallets')
-      .update({ last_synced_at: new Date().toISOString() })
-      .eq('id', wallet.id);
+    try {
+      const svc = requireServiceClient('getWalletBalances update last_synced_at');
+      await svc
+        .from('wallets')
+        .update({ last_synced_at: new Date().toISOString() })
+        .eq('id', wallet.id);
+    } catch (e) {
+      console.warn('Unable to update wallet last_synced_at in Supabase:', e.message || e);
+    }
 
     return res.json({ ok: true, data: { ...balanceResult, last_synced_at: new Date().toISOString() } });
   } catch (err) {
