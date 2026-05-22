@@ -15,11 +15,14 @@ async function runMigrations() {
 
     // Get all migration files
     const migrateDir = path.join(__dirname, "../migrate");
-    const files = fs.readdirSync(migrateDir)
-      .filter(file => file.endsWith('.sql'))
-      .sort(); // Sort to ensure proper order
+    const allFiles = fs.readdirSync(migrateDir).sort();
+    const files = allFiles.filter(file => {
+      // Only run incremental migration files with numeric prefixes.
+      // Ignore schema export snapshots and other non-migration artifacts.
+      return /^\d+_[^/]+\.sql$/.test(file) && !file.endsWith('_schema.sql');
+    });
 
-    console.log(`Found ${files.length} migration files`);
+    console.log(`Found ${files.length} migration files (from ${allFiles.length} total files)`);
 
     for (const file of files) {
       console.log(`📄 Running migration: ${file}`);

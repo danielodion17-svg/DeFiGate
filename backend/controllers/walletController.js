@@ -92,19 +92,13 @@ export const createEmbeddedWallet = async (req, res) => {
     }
 
     if (!isPrivyEnabled) {
-      return res.json({
-        ok: true,
-        data: {
-          id: `${userId}:${chainType}`,
-          user_id: userId,
-          provider: 'local',
-          provider_wallet_id: null,
-          address: null,
-          chain: chainType,
-          status: 'disconnected',
-          created_at: new Date().toISOString(),
-        },
+      const wallet = await getOrCreateWallet(userId, chainType, {
+        provider: 'local',
       });
+      if (!wallet) {
+        return res.status(500).json({ ok: false, error: 'Failed to create local wallet placeholder' });
+      }
+      return res.json({ ok: true, data: wallet });
     }
 
     const privyWallet = await createPrivyWallet(chainType);
