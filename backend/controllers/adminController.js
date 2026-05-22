@@ -1,7 +1,7 @@
 // controllers/adminController.js
 import { runReconciliation, autoRepairSafeMismatches } from '../services/reconciliationService.js';
 import { repairMissingDeposits } from '../services/balanceSyncService.js';
-import { processDeposit } from '../services/depositDetector.js';
+import { processDeposit } from '../services/depositService.js';
 import {
   generateForensicReport,
   archiveDuplicateWallets,
@@ -132,7 +132,12 @@ export const reprocessDeposit = async (req, res) => {
       if (!wallet.address) continue;
 
       try {
-        const credited = await processDeposit(wallet, txHash);
+        const credited = await processDeposit({
+          wallet_address: wallet.address,
+          tx_hash: txHash,
+          source: 'admin_reprocess',
+          chain: 'solana',
+        });
         if (credited) {
           processed = true;
           processedWallet = wallet;

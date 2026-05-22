@@ -11,6 +11,7 @@ import {
   ArchivedWallet,
 } from '../models/index.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
+import { processDeposit } from '../services/depositService.js';
 
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const USDC_MINT_ADDRESS = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
@@ -423,48 +424,6 @@ export async function rebuildBalancesFromLedger() {
   return { updated_balances: updates.length, details: updates };
 }
 
-async function buildDepositFromTransaction(tx, wallet) {
-  if (!tx || !tx.meta) return 0n;
-  const preBalances = new Map();
-  for (const pre of tx.meta.preTokenBalances || []) {
-    if (pre.owner !== wallet.address || pre.mint !== USDC_MINT_ADDRESS) continue;
-    preBalances.set(pre.accountIndex, parseTokenAmount(pre.uiTokenAmount));
-  }
-
-  let total = 0n;
-  for (const post of tx.meta.postTokenBalances || []) {
-    if (post.owner !== wallet.address || post.mint !== USDC_MINT_ADDRESS) continue;
-    const before = preBalances.get(post.accountIndex) || 0n;
-    const after = parseTokenAmount(post.uiTokenAmount);
-    const delta = after - before;
-    if (delta > 0n) total += delta;
-  }
-
-  return total;
-}
-
-async function ensureSystemAccount(transaction) {
-  const [systemUser] = await User.findOrCreate({
-    where: { email: SYSTEM_USER_EMAIL },
-    defaults: {
-      name: 'DeFiGate External Reserve',
-      is_verified: true,
-      kyc_status: 'pending',
-      preferred_chain: 'solana',
-      role: 'admin',
-    },
-    transaction,
-  });
-
-  const [systemAccount] = await Account.findOrCreate({
-    where: { user_id: systemUser.id, asset: 'USDC' },
-    defaults: { available_balance: 0, pending_balance: 0 },
-    transaction,
-  });
-
-  return systemAccount;
-}
-
 export async function recoverMissingOnchainDeposits({ walletId = null, batchLimit = 500 } = {}) {
   const wallets = walletId
     ? await Wallet.findAll({ where: { id: walletId } })
@@ -487,61 +446,27 @@ export async function recoverMissingOnchainDeposits({ walletId = null, batchLimi
         const existingTx = await Transaction.findOne({ where: { tx_hash: sig.signature } });
         if (existingTx) continue;
 
-        const tx = await connection.getParsedTransaction(sig.signature, { commitment: 'confirmed' });
-        if (!tx) continue;
+        const credited = await processDeposit({
+          wallet_address: wallet.address,
+          tx_hash: sig.signature,
+          source: 'repair_missing_onchain_deposit',
+          chain: 'solana',
+        });
+        if (!credited) continue;
 
-        const depositAmount = await buildDepositFromTransaction(tx, wallet);
-        if (depositAmount <= 0n) continue;
+        repairs.push({ wallet_id: wallet.id, signature: sig.signature, status: 'repaired' });
 
-        await sequelize.transaction(async (transaction) => {
-          const userAccount = await Account.findOrCreate({
-            where: { user_id: wallet.user_id, asset: 'USDC' },
-            defaults: { available_balance: 0, pending_balance: 0 },
-            transaction,
-          });
-
-          const systemAccount = await ensureSystemAccount(transaction);
-
-          const depositTransaction = await Transaction.create(
-            {
-              user_id: wallet.user_id,
-              type: 'deposit',
-              amount: formatUsdcAmount(depositAmount),
-              asset: 'USDC',
-              status: 'completed',
-              tx_hash: sig.signature,
-              wallet_id: wallet.id,
-              reference_id: tx.transaction.signatures?.[0] || sig.signature,
-            },
-            { transaction }
-          );
-
-          await LedgerEntry.create(
-            {
-              transaction_id: depositTransaction.id,
-              debit_account_id: systemAccount.id,
-              credit_account_id: userAccount[0].id,
-              amount: formatUsdcAmount(depositAmount),
-            },
-            { transaction }
-          );
-
-          await userAccount[0].increment({ available_balance: formatUsdcAmount(depositAmount) }, { transaction });
-
-          repairs.push({ wallet_id: wallet.id, signature: sig.signature, amount: formatUsdcAmount(depositAmount) });
-
-          await logAuditEvent(AUDIT_ACTIONS.DEPOSIT_DETECTED, {
-            user_id: wallet.user_id,
-            wallet_id: wallet.id,
-            transaction_id: depositTransaction.id,
-            tx_hash: sig.signature,
-            amount: formatUsdcAmount(depositAmount),
-            asset: 'USDC',
-            metadata: {
-              rpc_slot: sig.slot,
-              wallet_address: wallet.address,
-            },
-          });
+        await logAuditEvent(AUDIT_ACTIONS.DEPOSIT_DETECTED, {
+          user_id: wallet.user_id,
+          wallet_id: wallet.id,
+          tx_hash: sig.signature,
+          amount: null,
+          asset: null,
+          metadata: {
+            rpc_slot: sig.slot,
+            wallet_address: wallet.address,
+            source: 'repair_missing_onchain_deposit',
+          },
         });
       }
 
