@@ -14,7 +14,7 @@ import {
 } from '../services/repairService.js';
 import { approveWithdrawal, rejectWithdrawal, getPendingWithdrawals } from '../services/withdrawalService.js';
 import { Wallet, Transaction, User } from '../models/index.js';
-import { adjustAccount } from '../services/accountService.js';
+import { adjustAccount } from '../services/balanceService.js';
 import { logAuditEvent, AUDIT_ACTIONS, getAuditLogs } from '../services/auditService.js';
 import { respondError, respondSuccess } from '../utils/response.js';
 

@@ -1,4 +1,4 @@
-import { sequelize, User, Balance, Transaction, Transfer } from "../models/index.js";
+import { sequelize, User, Account, Transaction } from "../models/index.js";
 import dotenv from "dotenv";
 
 dotenv.config();

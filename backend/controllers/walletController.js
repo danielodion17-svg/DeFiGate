@@ -16,6 +16,8 @@ import {
   getCanonicalWalletByWalletId,
   getAllCanonicalWallets,
   getOrCreateWallet,
+  createPrivyWalletForUser,
+  syncPrivyWallet,
 } from "../services/walletService.js";
 import {
   getAssociatedTokenAddress,
@@ -52,22 +54,6 @@ function privyHeaders() {
   };
 }
 
-async function createPrivyWallet(chainType = "solana") {
-  if (!isPrivyEnabled) {
-    throw new Error("Privy credentials not configured");
-  }
-
-  if (chainType !== "solana") {
-    throw new Error("Only Solana wallets are supported");
-  }
-
-  const body = { chain_type: chainType };
-  const r = await axios.post(`${PRIVY_BASE}/v1/wallets`, body, {
-    headers: privyHeaders(),
-  });
-  return r.data;
-}
-
 async function getWalletByUserId(userId) {
   return getCanonicalWallet(userId, "solana");
 }
@@ -101,31 +87,10 @@ export const createEmbeddedWallet = async (req, res) => {
       return res.json({ ok: true, data: wallet });
     }
 
-    const privyWallet = await createPrivyWallet(chainType);
-    const wallet = await getOrCreateWallet(userId, chainType, {
-      provider: 'privy',
-      provider_wallet_id: privyWallet.id,
-      address: privyWallet.accounts?.[0]?.address || privyWallet.address,
-      encrypted_private_key: null,
-    });
-
+    const wallet = await createPrivyWalletForUser(userId, chainType);
     if (!wallet) {
       return res.status(500).json({ ok: false, error: 'Failed to create wallet' });
     }
-
-    await logAuditEvent(AUDIT_ACTIONS.WALLET_CREATED, {
-      user_id: userId,
-      wallet_id: wallet.id,
-      asset: chainType,
-      tx_hash: null,
-      metadata: {
-        provider: wallet.provider,
-        provider_wallet_id: wallet.provider_wallet_id,
-        wallet_address: wallet.address,
-        created_at: wallet.created_at,
-      },
-      request_id: `wallet_create_${Date.now()}`,
-    });
 
     return res.json({ ok: true, data: wallet });
   } catch (err) {

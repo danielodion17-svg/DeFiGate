@@ -11,7 +11,7 @@ import axios from 'axios';
 import dotenv from 'dotenv';
 import { Op } from 'sequelize';
 import { sequelize, Transaction, Account, Wallet } from '../models/index.js';
-import { creditAccount, reserveFunds, releaseFunds, commitReservedFunds } from '../services/accountService.js';
+import { creditAccount, reserveFunds, releaseFunds, commitReservedFunds } from '../services/balanceService.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 
 dotenv.config();

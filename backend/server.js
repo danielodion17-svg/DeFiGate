@@ -21,6 +21,7 @@ import adminRoutes from "./routes/admin.js";
 import { requestContext } from "./middleware/requestContext.js";
 import { startReconciliationJob } from "./services/reconciliationJob.js";
 import { startBalanceSyncJob } from "./services/balanceSyncService.js";
+import { runStartupValidation } from "./scripts/startupValidation.js";
 
 const app = express();
 
@@ -99,6 +100,9 @@ const PORT = process.env.PORT || 5000;
 
 (async () => {
   try {
+    // Run startup validations first
+    await runStartupValidation();
+
     await sequelize.authenticate();
     console.log("✅ Database connected");
     if (hasSupabaseUrl) {

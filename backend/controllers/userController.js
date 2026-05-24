@@ -7,7 +7,7 @@ import { sendVerificationEmail } from "../services/emailService.js";
 import { respondError, respondSuccess } from "../utils/response.js";
 import Transaction from "../models/Transaction.js";
 import { sequelize } from "../models/index.js";
-import { getOrCreateAccount, creditAccount, getDerivedBalance } from "../services/accountService.js";
+import { getOrCreateBalance, creditAccount, getDerivedBalance } from "../services/balanceService.js";
 import { hasServiceClient } from "../config/supabase.js";
 
 function normalizeEmail(email) {
@@ -55,8 +55,8 @@ export const signup = async (req, res) => {
 
     if (hasServiceClient()) {
       try {
-        await getOrCreateAccount(user.id, 'USDC');
-        await getOrCreateAccount(user.id, 'SOL');
+        await getOrCreateBalance(user.id, 'USDC');
+        await getOrCreateBalance(user.id, 'SOL');
         console.info(JSON.stringify({ event: 'signup.accounts_initialized', traceId, userId: user.id }));
       } catch (err) {
         console.error("Account creation error", err);

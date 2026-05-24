@@ -1,283 +1,193 @@
-import { supabase } from '../config/supabase.js';
-import pool from '../db.js';
+import axios from 'axios';
+import { Wallet } from '../models/index.js';
+import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 
-function normalizeChain(chainType) {
-  return String(chainType || 'solana').toLowerCase();
+const PRIVY_APP_ID = process.env.PRIVY_APP_ID;
+const PRIVY_APP_SECRET = process.env.PRIVY_APP_SECRET;
+const PRIVY_BASE = 'https://api.privy.io';
+
+function normalizeChain(chainType = 'solana') {
+  return String(chainType || 'solana').trim().toLowerCase();
 }
 
-function throwIfSupabaseError(error, context) {
-  if (error) {
-    const message = error.message || `Supabase error during ${context}`;
-    throw new Error(message);
+function validateAddress(address) {
+  return String(address || '').trim();
+}
+
+function privyHeaders() {
+  if (!PRIVY_APP_ID || !PRIVY_APP_SECRET) {
+    throw new Error('Privy credentials not configured');
   }
-}
-
-function normalizeWalletRow(row) {
-  if (!row) return null;
+  const encoded = Buffer.from(`${PRIVY_APP_ID}:${PRIVY_APP_SECRET}`).toString('base64');
   return {
-    ...row,
-    id: row.id,
-    user_id: row.user_id,
-    provider: row.provider,
-    provider_wallet_id: row.provider_wallet_id,
-    address: row.address,
-    chain: row.chain,
-    encrypted_private_key: row.encrypted_private_key,
-    last_scanned_signature: row.last_scanned_signature,
-    last_scanned_at: row.last_scanned_at,
-    is_primary: row.is_primary,
-    is_archived: row.is_archived,
-    archived_at: row.archived_at,
-    created_at: row.created_at,
-    updated_at: row.updated_at,
+    Authorization: `Basic ${encoded}`,
+    'privy-app-id': PRIVY_APP_ID,
+    'Content-Type': 'application/json',
   };
 }
 
 export async function warnIfDuplicateWallets(userId) {
-  if (!supabase) return;
-
-  const { count, error } = await supabase
-    .from('wallets')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', userId);
-
-  throwIfSupabaseError(error, 'warnIfDuplicateWallets');
-  if (typeof count === 'number' && count > 1) {
-    console.warn(
-      `Wallet warning: user ${userId} has ${count} wallets. Using canonical wallet only.`
-    );
+  if (!userId) return;
+  const count = await Wallet.count({ where: { user_id: userId } });
+  if (count > 1) {
+    console.warn(`Wallet warning: user ${userId} has ${count} wallets. Using canonical wallet only.`);
   }
 }
 
 export async function getCanonicalWallet(userId, chainType = 'solana') {
   if (!userId) return null;
-
-  if (supabase) {
-    const { data, error } = await supabase
-      .from('wallets')
-      .select('*')
-      .eq('user_id', userId)
-      .order('is_primary', { ascending: false })
-      .order('created_at', { ascending: true })
-      .limit(1);
-
-    throwIfSupabaseError(error, 'getCanonicalWallet');
-
-    const wallet = (data && data[0]) || null;
-    if (wallet) {
-      await warnIfDuplicateWallets(userId);
-    }
-    return wallet;
+  const chain = normalizeChain(chainType);
+  const wallet = await Wallet.findOne({
+    where: { user_id: userId, chain },
+    order: [['is_primary', 'DESC'], ['created_at', 'ASC']],
+  });
+  if (wallet) {
+    await warnIfDuplicateWallets(userId);
   }
-
-  const result = await pool.query(
-    `SELECT * FROM wallets WHERE user_id = $1 ORDER BY is_primary DESC, created_at ASC LIMIT 1`,
-    [userId]
-  );
-  const wallet = result.rows[0] || null;
-  return normalizeWalletRow(wallet);
+  return wallet;
 }
 
-export async function getOrCreateWallet(userId, chainType = 'solana', walletData = null) {
-  if (!userId) return null;
+export async function resolveWallet(address, chainType = 'solana') {
+  const normalizedAddress = validateAddress(address);
+  if (!normalizedAddress) {
+    throw new Error('MISSING_WALLET_ADDRESS');
+  }
   const chain = normalizeChain(chainType);
-  const existingWallet = await getCanonicalWallet(userId);
-  if (existingWallet) {
-    if (walletData) {
-      const incomingAddress = String(
-        walletData.address || walletData?.accounts?.[0]?.address || ''
-      ).trim() || null;
-      const incomingProvider = walletData.provider || 'local';
-      const incomingProviderWalletId = walletData.id || walletData.provider_wallet_id || null;
-      const incomingEncryptedPrivateKey = walletData.encrypted_private_key || null;
-      const updates = {};
+  const wallet = await Wallet.findOne({ where: { address: normalizedAddress, chain } });
+  return wallet;
+}
 
-      if (incomingAddress && !existingWallet.address) {
-        updates.address = incomingAddress;
-      }
-      if (incomingProvider && incomingProvider !== existingWallet.provider) {
-        updates.provider = incomingProvider;
-      }
-      if (incomingProviderWalletId && !existingWallet.provider_wallet_id) {
-        updates.provider_wallet_id = incomingProviderWalletId;
-      }
-      if (incomingEncryptedPrivateKey && !existingWallet.encrypted_private_key) {
-        updates.encrypted_private_key = incomingEncryptedPrivateKey;
-      }
-      if (chain && !existingWallet.chain) {
-        updates.chain = chain;
-      }
-
-      if (Object.keys(updates).length > 0) {
-        const fields = Object.keys(updates).map((field, index) => `${field} = $${index + 1}`).join(', ');
-        const values = Object.values(updates);
-        values.push(existingWallet.id);
-        const updateResult = await pool.query(
-          `UPDATE wallets SET ${fields}, updated_at = $${values.length + 1} WHERE id = $${values.length} RETURNING *`,
-          [...values, new Date().toISOString()]
-        );
-        if (updateResult.rows.length > 0) {
-          return normalizeWalletRow(updateResult.rows[0]);
-        }
-      }
+async function insertOrFetchWallet(userId, walletPayload) {
+  try {
+    const wallet = await Wallet.create(walletPayload);
+    await logAuditEvent(AUDIT_ACTIONS.WALLET_CREATED, {
+      user_id: userId,
+      wallet_id: wallet.id,
+      metadata: {
+        provider: wallet.provider,
+        provider_wallet_id: wallet.provider_wallet_id,
+        wallet_address: wallet.address,
+        chain: wallet.chain,
+      },
+      severity: 'info',
+    });
+    return wallet;
+  } catch (error) {
+    if (error.name === 'SequelizeUniqueConstraintError' || error.original?.code === '23505') {
+      return await getCanonicalWallet(userId, walletPayload.chain);
     }
+    throw error;
+  }
+}
 
+export async function getOrCreateWallet(userId, chainType = 'solana', walletData = {}) {
+  if (!userId) {
+    throw new Error('MISSING_USER_ID');
+  }
+
+  const chain = normalizeChain(chainType);
+  const existingWallet = await getCanonicalWallet(userId, chain);
+  if (existingWallet) {
     return existingWallet;
   }
 
-  const address = walletData?.address || walletData?.accounts?.[0]?.address || null;
-  const provider = walletData?.provider || 'local';
-  const providerWalletId = walletData?.id || walletData?.provider_wallet_id || null;
-  const encryptedPrivateKey = walletData?.encrypted_private_key || null;
-  const now = new Date().toISOString();
+  const provider = String(walletData.provider || 'local').trim().toLowerCase();
+  const providerWalletId = walletData.provider_wallet_id || walletData.id || null;
+  let address = validateAddress(walletData.address || walletData.accounts?.[0]?.address || '');
 
-  const insertQuery = `
-    INSERT INTO wallets (
-      user_id,
-      provider,
-      provider_wallet_id,
-      address,
-      chain,
-      encrypted_private_key,
-      last_accessed_at,
-      is_primary,
-      is_archived,
-      created_at,
-      updated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, true, false, $8, $8)
-    ON CONFLICT (user_id) DO NOTHING
-    RETURNING *;
-  `;
-
-  try {
-    const result = await pool.query(insertQuery, [
-      userId,
-      provider,
-      providerWalletId,
-      address,
-      chain,
-      encryptedPrivateKey,
-      now,
-      now,
-    ]);
-
-    if (result.rows.length > 0) {
-      return normalizeWalletRow(result.rows[0]);
+  if (!address) {
+    if (provider === 'local') {
+      address = `local:${userId}`;
+    } else {
+      throw new Error('MISSING_WALLET_ADDRESS');
     }
-  } catch (err) {
-    if (err.code !== '23505') {
-      throw err;
-    }
-
-    const existingAfterConflict = await getCanonicalWallet(userId);
-    if (existingAfterConflict) {
-      return existingAfterConflict;
-    }
-    throw err;
   }
 
-  // Concurrent insert may have created the row; return the canonical wallet.
-  return await getCanonicalWallet(userId);
+  const walletPayload = {
+    user_id: userId,
+    provider,
+    provider_wallet_id: providerWalletId,
+    address,
+    chain,
+    is_primary: true,
+    is_archived: false,
+  };
+
+  return await insertOrFetchWallet(userId, walletPayload);
 }
 
-export async function getCanonicalWalletByWalletId(walletId) {
-  if (!walletId) return null;
+async function createPrivyWallet(chainType = 'solana') {
+  if (!PRIVY_APP_ID || !PRIVY_APP_SECRET) {
+    throw new Error('Privy credentials are not configured');
+  }
+  if (normalizeChain(chainType) !== 'solana') {
+    throw new Error('Only Solana wallet creation is supported');
+  }
+  const body = { chain_type: 'solana' };
+  const response = await axios.post(`${PRIVY_BASE}/v1/wallets`, body, { headers: privyHeaders() });
+  return response.data;
+}
 
-  if (supabase) {
-    const { data, error } = await supabase
-      .from('wallets')
-      .select('*')
-      .eq('id', walletId)
-      .limit(1)
-      .single();
-
-    if (error && error.code === 'PGRST116') {
-      return null;
-    }
-    throwIfSupabaseError(error, 'getCanonicalWalletByWalletId');
-
-    const wallet = data || null;
-    if (!wallet) return null;
-
-    const canonical = await getCanonicalWallet(wallet.user_id, wallet.chain || 'solana');
-    if (canonical && canonical.id !== wallet.id) {
-      console.error(
-        `Wallet fallback: requested wallet ${wallet.id} but using canonical wallet ${canonical.id} for user ${canonical.user_id}.`
-      );
-    }
-
-    return canonical || wallet;
+export async function createPrivyWalletForUser(userId, chainType = 'solana') {
+  const chain = normalizeChain(chainType);
+  const existingWallet = await getCanonicalWallet(userId, chain);
+  if (existingWallet) {
+    await logAuditEvent(AUDIT_ACTIONS.WALLET_REUSED, {
+      user_id: userId,
+      wallet_id: existingWallet.id,
+      metadata: {
+        wallet_address: existingWallet.address,
+        provider: existingWallet.provider,
+        provider_wallet_id: existingWallet.provider_wallet_id,
+      },
+    });
+    return existingWallet;
   }
 
-  const result = await pool.query(`SELECT * FROM wallets WHERE id = $1 LIMIT 1`, [walletId]);
-  const wallet = result.rows[0] || null;
-  if (!wallet) return null;
-
-  const canonical = await getCanonicalWallet(wallet.user_id, wallet.chain || 'solana');
-  if (canonical && canonical.id !== wallet.id) {
-    console.error(
-      `Wallet fallback: requested wallet ${wallet.id} but using canonical wallet ${canonical.id} for user ${canonical.user_id}.`
-    );
+  const privyWallet = await createPrivyWallet(chain);
+  const address = validateAddress(privyWallet.accounts?.[0]?.address || privyWallet.address);
+  if (!address) {
+    throw new Error('Privy wallet response did not include an address');
   }
 
-  return canonical || normalizeWalletRow(wallet);
+  return await getOrCreateWallet(userId, chain, {
+    provider: 'privy',
+    provider_wallet_id: privyWallet.id,
+    address,
+  });
+}
+
+export async function syncPrivyWallet(userId) {
+  const wallet = await getCanonicalWallet(userId, 'solana');
+  if (!wallet || wallet.provider !== 'privy') {
+    throw new Error('Privy wallet not found for user');
+  }
+  if (!wallet.provider_wallet_id) {
+    throw new Error('Privy wallet metadata missing provider_wallet_id');
+  }
+
+  const response = await axios.get(`${PRIVY_BASE}/v1/wallets/${wallet.provider_wallet_id}`, {
+    headers: privyHeaders(),
+  });
+
+  const address = validateAddress(response.data.accounts?.[0]?.address || response.data.address);
+  const chain = normalizeChain(response.data.chain_type || wallet.chain || 'solana');
+  if (!address) {
+    throw new Error('Privy wallet response did not include a valid address');
+  }
+
+  if (address !== wallet.address || chain !== wallet.chain) {
+    await wallet.update({ address, chain });
+  }
+
+  return wallet;
 }
 
 export async function getAllCanonicalWallets(chainType = 'solana') {
   const chain = normalizeChain(chainType);
-  if (supabase) {
-    const { data, error } = await supabase
-      .from('wallets')
-      .select('*')
-      .eq('chain', chain)
-      .order('user_id', { ascending: true })
-      .order('is_primary', { ascending: false })
-      .order('created_at', { ascending: true });
-
-    throwIfSupabaseError(error, 'getAllCanonicalWallets');
-
-    const canonicalByUser = new Map();
-    for (const wallet of data || []) {
-      if (!canonicalByUser.has(wallet.user_id)) {
-        canonicalByUser.set(wallet.user_id, wallet);
-      }
-    }
-
-    for (const row of Array.from(canonicalByUser.values())) {
-      const duplicates = data.filter(
-        (w) => w.user_id === row.user_id && w.chain === chain
-      );
-      if (duplicates.length > 1) {
-        console.warn(
-          `Wallet warning: user ${row.user_id} has ${duplicates.length} wallets for chain ${chainType}. Using canonical wallet only.`
-        );
-      }
-    }
-
-    return Array.from(canonicalByUser.values());
-  }
-
-  const result = await pool.query(
-    `SELECT * FROM wallets WHERE chain = $1 ORDER BY user_id ASC, is_primary DESC, created_at ASC`,
-    [chain]
-  );
-  const canonicalByUser = new Map();
-  for (const wallet of result.rows) {
-    if (!canonicalByUser.has(wallet.user_id)) {
-      canonicalByUser.set(wallet.user_id, normalizeWalletRow(wallet));
-    }
-  }
-
-  for (const row of Array.from(canonicalByUser.values())) {
-    const duplicates = result.rows.filter(
-      (w) => w.user_id === row.user_id && w.chain === chain
-    );
-    if (duplicates.length > 1) {
-      console.warn(
-        `Wallet warning: user ${row.user_id} has ${duplicates.length} wallets for chain ${chainType}. Using canonical wallet only.`
-      );
-    }
-  }
-
-  return Array.from(canonicalByUser.values());
+  const wallets = await Wallet.findAll({
+    where: { chain, is_archived: false },
+    order: [['user_id', 'ASC'], ['is_primary', 'DESC'], ['created_at', 'ASC']],
+  });
+  return wallets;
 }

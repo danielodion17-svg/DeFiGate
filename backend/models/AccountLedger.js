@@ -26,40 +26,36 @@ const AccountLedger = sequelize.define(
       allowNull: false,
       defaultValue: "USDC",
     },
-    debit_account_id: {
-      type: DataTypes.UUID,
-      allowNull: false,
-    },
-    credit_account_id: {
-      type: DataTypes.UUID,
-      allowNull: false,
-    },
-    amount: {
-      type: DataTypes.DECIMAL(36, 18),
-      allowNull: false,
-    },
     entry_type: {
       type: DataTypes.STRING,
       allowNull: false,
       defaultValue: "ledger",
     },
+    amount: {
+      type: DataTypes.DECIMAL(36, 18),
+      allowNull: false,
+    },
+    tx_hash: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
     reference_id: {
       type: DataTypes.STRING,
+      allowNull: true,
+    },
+    transfer_id: {
+      type: DataTypes.UUID,
       allowNull: true,
     },
     metadata: {
       type: DataTypes.JSONB,
       allowNull: true,
     },
-    created_at: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW,
-    },
   },
   {
     tableName: "account_ledger",
     timestamps: false,
+    createdAt: "created_at",
   }
 );
 

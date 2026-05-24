@@ -3,7 +3,7 @@ import { Connection, PublicKey } from '@solana/web3.js';
 import { sequelize, User, Account, Transaction, Wallet, AuditLog } from '../models/index.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 import { getCanonicalWallet, getCanonicalWalletByWalletId, getAllCanonicalWallets } from '../services/walletService.js';
-import { getDerivedBalance, creditAccount, getOrCreateAccount } from '../services/accountService.js';
+import { getDerivedBalance, creditAccount, getOrCreateBalance } from '../services/balanceService.js';
 import { Op } from 'sequelize';
 
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
@@ -338,7 +338,7 @@ export async function autoRepairSafeMismatches() {
             tx_hash: `repair_${Date.now()}_${wallet.id}_${asset}`,
           }, { transaction });
 
-          await getOrCreateAccount(wallet.user_id, asset, transaction);
+          await getOrCreateBalance(wallet.user_id, asset, transaction);
           await creditAccount(wallet.user_id, result.difference.toString(), {
             asset,
             walletId: wallet.id,

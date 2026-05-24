@@ -1,8 +1,8 @@
 import { Connection, PublicKey } from '@solana/web3.js';
-import { sequelize, User, Account, Wallet, Transaction, LedgerEntry } from '../models/index.js';
+import { User, Account, Wallet, Transaction } from '../models/index.js';
 import { getAppLedgerBalance } from './reconciliationService.js';
 import { getCanonicalWallet, getCanonicalWalletByWalletId, getAllCanonicalWallets } from '../services/walletService.js';
-import { creditAccount, getOrCreateAccount } from '../services/accountService.js';
+import { creditAccount, getOrCreateBalance } from '../services/balanceService.js';
 import { processDeposit } from '../services/depositService.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 
