@@ -9,19 +9,20 @@ import {
   AccountLedger,
 } from '../models/index.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
-import { processDeposit } from './depositService.js';
+import { processDeposit } from '../services/depositService.js';
 
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const USDC_MINT_ADDRESS = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+const SYSTEM_USER_EMAIL = process.env.SYSTEM_USER_EMAIL || 'system@defigate.internal';
 const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
 
-function parseTokenAmount(tokenBalance) {
-  if (!tokenBalance) return 0n;
-  const amount = tokenBalance.uiAmountString || tokenBalance.amount || tokenBalance.uiAmount || '0';
+function parseTokenAmount(tokenAmount) {
+  if (!tokenAmount) return 0n;
+  const amountString = String(tokenAmount.amount || tokenAmount.uiAmount || '0');
   try {
-    return BigInt(amount.toString().replace('.', ''));
+    return BigInt(amountString);
   } catch {
-    return BigInt(Math.floor(Number(amount) * 1e6));
+    return BigInt(Math.floor((tokenAmount.uiAmount || 0) * 1e6));
   }
 }
 
@@ -33,11 +34,15 @@ function formatUsdcAmount(amountBaseUnits) {
 }
 
 async function getBlockchainBalances(address) {
-  const balances = { sol: null, usdc: null };
+  const result = {
+    sol: null,
+    usdc: null,
+  };
+
   try {
     const publicKey = new PublicKey(address);
-    const lamports = await connection.getBalance(publicKey, 'confirmed');
-    balances.sol = Number(lamports) / 1e9;
+    const balanceLamports = await connection.getBalance(publicKey, 'confirmed');
+    result.sol = Number(balanceLamports) / 1e9;
 
     const tokenAccounts = await connection.getTokenAccountsByOwner(publicKey, {
       mint: new PublicKey(USDC_MINT_ADDRESS),
@@ -49,17 +54,24 @@ async function getBlockchainBalances(address) {
       totalUsdc += BigInt(Math.floor((tokenBalance.value.uiAmount || 0) * 1e6));
     }
 
-    balances.usdc = Number(totalUsdc) / 1e6;
+    result.usdc = Number(totalUsdc) / 1e6;
   } catch (error) {
-    console.error(`Blockchain balance fetch failed for ${address}:`, error?.message || error);
+    console.error(`Blockchain balance fetch failed for ${address}:`, error.message || error);
   }
 
-  return balances;
+  return result;
 }
 
 async function getDerivedLedgerBalances(userId) {
   const rows = await sequelize.query(
-    `SELECT asset, COALESCE(SUM(amount::numeric), 0) AS amount FROM account_ledger WHERE user_id = ? GROUP BY asset`,
+    `SELECT
+      b.asset as asset,
+      COALESCE(SUM(CASE WHEN al.credit_account_id = b.id THEN al.amount::numeric ELSE 0 END), 0) AS credits,
+      COALESCE(SUM(CASE WHEN al.debit_account_id = b.id THEN al.amount::numeric ELSE 0 END), 0) AS debits
+    FROM balances b
+    LEFT JOIN account_ledger al ON al.debit_account_id = b.id OR al.credit_account_id = b.id
+    WHERE b.user_id = ?
+    GROUP BY b.asset`,
     {
       replacements: [userId],
       type: sequelize.QueryTypes.SELECT,
@@ -67,18 +79,14 @@ async function getDerivedLedgerBalances(userId) {
   );
 
   return rows.reduce((map, row) => {
-    map[row.asset] = Number(row.amount);
+    map[row.asset] = Number(row.credits) - Number(row.debits);
     return map;
   }, {});
 }
 
 async function getCachedBalances(userId) {
   const balances = await Account.findAll({ where: { user_id: userId } });
-  return balances.map((balance) => ({
-    asset: balance.asset,
-    available_balance: Number(balance.available_balance),
-    pending_balance: Number(balance.pending_balance),
-  }));
+  return balances.map((balance) => ({ asset: balance.asset, available_balance: Number(balance.available_balance), pending_balance: Number(balance.pending_balance) }));
 }
 
 async function getMissingTransactionCount(userId) {
@@ -114,40 +122,6 @@ async function getCanonicalWallet(userId) {
   return Wallet.findOne({ where: { user_id: userId }, order: [['created_at', 'ASC']] });
 }
 
-function getSolDepositAmount(tx, walletAddress) {
-  if (!tx?.meta || tx.meta.err || !Array.isArray(tx.meta.preBalances) || !Array.isArray(tx.meta.postBalances) || !Array.isArray(tx.transaction?.message?.accountKeys)) {
-    return 0n;
-  }
-  const accountKeys = tx.transaction.message.accountKeys.map((key) => key.toString());
-  const index = accountKeys.indexOf(walletAddress);
-  if (index < 0) return 0n;
-  const before = BigInt(tx.meta.preBalances[index] || 0);
-  const after = BigInt(tx.meta.postBalances[index] || 0);
-  const delta = after - before;
-  return delta > 0n ? delta : 0n;
-}
-
-function getUsdcDepositAmount(tx, walletAddress) {
-  if (!tx?.meta) return 0n;
-  const before = new Map();
-  for (const pre of tx.meta.preTokenBalances || []) {
-    if (pre.owner !== walletAddress || pre.mint !== USDC_MINT_ADDRESS) continue;
-    before.set(pre.accountIndex, parseTokenAmount(pre.uiTokenAmount || pre));
-  }
-
-  let total = 0n;
-  for (const post of tx.meta.postTokenBalances || []) {
-    if (post.owner !== walletAddress || post.mint !== USDC_MINT_ADDRESS) continue;
-    const index = post.accountIndex;
-    const preAmount = before.get(index) || 0n;
-    const postAmount = parseTokenAmount(post.uiTokenAmount || post);
-    const delta = postAmount - preAmount;
-    if (delta > 0n) total += delta;
-  }
-
-  return total;
-}
-
 export async function generateForensicReport({ scanBlockchain = false, limit = 100 } = {}) {
   const users = await User.findAll({ limit, order: [['created_at', 'ASC']] });
   const report = [];
@@ -166,15 +140,13 @@ export async function generateForensicReport({ scanBlockchain = false, limit = 1
     const mismatchAmounts = cachedBalances.reduce((acc, balance) => {
       const derived = ledgerBalances[balance.asset] ?? 0;
       const mismatch = Number(balance.available_balance) - Number(derived);
-      if (Math.abs(mismatch) > 0.000001) acc[balance.asset] = mismatch;
+      if (Math.abs(mismatch) > 0.000001) {
+        acc[balance.asset] = mismatch;
+      }
       return acc;
     }, {});
 
-    if (Object.keys(mismatchAmounts).length > 0) totalMismatches += 1;
-    totalDuplicates += duplicateWalletCount;
-    totalMissingTx += missingTxCount;
-
-    report.push({
+    const userReport = {
       user_id: user.id,
       email: user.email,
       canonical_wallet: canonicalWallet ? {
@@ -190,7 +162,15 @@ export async function generateForensicReport({ scanBlockchain = false, limit = 1
       mismatch_amounts: mismatchAmounts,
       missing_transactions_count: missingTxCount,
       duplicate_wallet_count: duplicateWalletCount,
-    });
+    };
+
+    if (Object.keys(mismatchAmounts).length > 0) {
+      totalMismatches += 1;
+    }
+    totalDuplicates += duplicateWalletCount;
+    totalMissingTx += missingTxCount;
+
+    report.push(userReport);
   }
 
   return {
@@ -202,11 +182,11 @@ export async function generateForensicReport({ scanBlockchain = false, limit = 1
     report,
     recommendations: [
       'Archive duplicate canonical wallets and keep the oldest primary wallet.',
-      'Ensure canonical wallet rows exist for all users before removing legacy columns.',
+      'Ensure canonical wallet rows exist for all users before dropping legacy wallet columns.',
       'Rebuild balances cache from account_ledger and reconcile any mismatches.',
       'Scan wallet history for missing on-chain deposits and repair missing deposits idempotently.',
-      'Use offline data migration to handle any legacy ledger_entries cleanup.',
-      'Verify financial integrity with blockchain balances, ledger totals, and cache projections.',
+      'Migrate legacy ledger_entries into account_ledger for canonical ledger reporting.',
+      'Verify financial integrity with blockchains, ledger totals, and cache projection checks.',
     ],
   };
 }
@@ -214,52 +194,32 @@ export async function generateForensicReport({ scanBlockchain = false, limit = 1
 export async function archiveDuplicateWallets() {
   const wallets = await Wallet.findAll({ order: [['created_at', 'ASC']] });
   const grouped = wallets.reduce((acc, wallet) => {
-    if (!wallet.user_id) return acc;
-    acc[wallet.user_id] = acc[wallet.user_id] || [];
-    acc[wallet.user_id].push(wallet);
+    const key = `${wallet.user_id}`;
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(wallet);
     return acc;
   }, {});
 
-  const archivedIds = [];
-
-  for (const userId of Object.keys(grouped)) {
-    const userWallets = grouped[userId];
-    if (userWallets.length <= 1) continue;
-
-    const primary = userWallets.find((wallet) => wallet.is_primary) || userWallets[0];
-    for (const wallet of userWallets) {
-      if (wallet.id === primary.id) continue;
-      if (wallet.is_archived && wallet.archived_at) continue;
-      wallet.is_archived = true;
-      wallet.is_primary = false;
-      wallet.archived_at = new Date();
-      await wallet.save();
-      archivedIds.push(wallet.id);
-    }
-
-    if (!primary.is_primary) {
-      primary.is_primary = true;
-      await primary.save();
-    }
-  }
-
-  return {
-    archived_wallet_ids: archivedIds,
-    archived_count: archivedIds.length,
-    message: archivedIds.length > 0 ? 'Duplicate canonical wallets archived.' : 'No duplicate canonical wallets found.',
-  };
+  const archived = [];
+export async function archiveMultipleDuplicateWallets() {
+  // In canonical architecture, there should be only one wallet per user (enforced by unique index).
+  // This function is a no-op on fresh deployment.
+  return { archived_wallet_ids: [], archived_count: 0, message: 'Canonical architecture enforces one wallet per user' };
 }
 
 export async function backfillCanonicalWallets() {
   return {
     disabled: true,
-    message: 'Legacy wallet backfill is disabled in the canonical runtime. Use an offline migration to populate canonical wallets from legacy data sources.',
+    message:
+      'Legacy wallet backfill is disabled in the canonical runtime. Use an offline migration to populate canonical wallets and remove users.wallet_address / privy_wallet_id.',
   };
 }
 
 export async function repairWallet(walletId) {
   const wallet = await Wallet.findByPk(walletId);
-  if (!wallet) throw new Error('Wallet not found');
+  if (!wallet) {
+    throw new Error('Wallet not found');
+  }
 
   const repairs = {
     wallet_id: walletId,
@@ -268,23 +228,31 @@ export async function repairWallet(walletId) {
     balance_rebuild: null,
   };
 
-  const updates = {};
-  if (!wallet.chain) updates.chain = 'solana';
-  if (!wallet.provider) updates.provider = 'solana';
-  if (wallet.is_archived) updates.is_archived = false;
-  if (Object.keys(updates).length > 0) {
-    await wallet.update(updates);
-    repairs.updated_fields = updates;
-  }
+  await sequelize.transaction(async (transaction) => {
+    const updated = {};
+    if (!wallet.chain) updated.chain = 'solana';
+    if (!wallet.provider) updated.provider = 'legacy';
+    if (wallet.is_archived) updated.is_archived = false;
+    if (Object.keys(updated).length > 0) {
+      await wallet.update(updated, { transaction });
+      repairs.updated_fields = updated;
+    }
 
-  const primaryCandidate = await Wallet.findOne({ where: { user_id: wallet.user_id, is_primary: true } });
-  if (!primaryCandidate) {
-    await wallet.update({ is_primary: true });
-    repairs.updated_fields.is_primary = true;
-  }
+    const primaryCandidate = await Wallet.findOne({
+      where: { user_id: wallet.user_id, is_primary: true },
+      transaction,
+    });
+    if (!primaryCandidate) {
+      await wallet.update({ is_primary: true }, { transaction });
+      repairs.updated_fields.is_primary = true;
+    }
+  });
 
-  repairs.scanned = await recoverMissingOnchainDeposits({ walletId });
-  repairs.balance_rebuild = await rebuildBalancesFromLedger();
+  const scanResult = await recoverMissingOnchainDeposits({ walletId });
+  const rebuildResult = await rebuildBalancesFromLedger();
+
+  repairs.scanned = scanResult;
+  repairs.balance_rebuild = rebuildResult;
 
   return repairs;
 }
@@ -295,13 +263,66 @@ export async function rebuildBalancesFromLedger() {
 
   const ledgerRows = await sequelize.query(
     `SELECT
-      al.user_id,
-      al.asset,
+      b.id as balance_id,
+      b.user_id,
+      b.asset,
+      COALESCE(SUM(CASE WHEN t.status IN (${completedStatuses.map((s) => `'${s}'`).join(',')}) AND al.credit_account_id = b.id THEN al.amount::numeric ELSE 0 END), 0) AS completed_credits,
+      COALESCE(SUM(CASE WHEN t.status IN (${completedStatuses.map((s) => `'${s}'`).join(',')}) AND al.debit_account_id = b.id THEN al.amount::numeric ELSE 0 END), 0) AS completed_debits,
+      COALESCE(SUM(CASE WHEN t.status IN (${pendingStatuses.map((s) => `'${s}'`).join(',')}) AND al.credit_account_id = b.id THEN al.amount::numeric ELSE 0 END), 0) AS pending_credits,
+      COALESCE(SUM(CASE WHEN t.status IN (${pendingStatuses.map((s) => `'${s}'`).join(',')}) AND al.debit_account_id = b.id THEN al.amount::numeric ELSE 0 END), 0) AS pending_debits
+    FROM balances b
+    LEFT JOIN account_ledger al ON al.debit_account_id = b.id OR al.credit_account_id = b.id
+    LEFT JOIN transactions t ON t.id = al.transaction_id
+    GROUP BY b.id, b.user_id, b.asset`,
+    {
+      type: sequelize.QueryTypes.SELECT,
+    }
+  );
+
+  const updates = [];
+
+  await sequelize.transaction(async (transaction) => {
+    for (const row of ledgerRows) {
+      const available = Number(row.completed_credits) - Number(row.completed_debits);
+      const pending = Number(row.pending_credits) - Number(row.pending_debits);
+      const account = await Account.findOrCreate({
+        where: { user_id: row.user_id, asset: row.asset },
+        defaults: {
+          available_balance: available,
+          pending_balance: pending,
+        },
+        transaction,
+      });
+      const accountInstance = account[0];
+
+      const before = { available_balance: Number(accountInstance.available_balance), pending_balance: Number(accountInstance.pending_balance) };
+      const after = { available_balance: available, pending_balance: pending };
+
+      if (before.available_balance !== after.available_balance || before.pending_balance !== after.pending_balance) {
+        await accountInstance.update(after, { transaction });
+        updates.push({ balance_id: accountInstance.id, before, after });
+      }
+    }
+
+    const allAccounts = await Account.findAll({ transaction });
+    for (const account of allAccounts) {
+      const found = ledgerRows.find((row) => row.user_id === account.user_id && row.asset === account.asset);
+  // In canonical architecture, balances are rebuilt from account_ledger using summed amounts.
+  // Positive amounts are credits (deposits, transfers in), negative are debits (transfers out).
+  
+  const completedStatuses = ['completed', 'confirmed'];
+  const pendingStatuses = ['pending', 'pending_review', 'approved', 'broadcasting', 'broadcasted'];
+
+  const ledgerRows = await sequelize.query(
+    `SELECT
+      b.user_id,
+      b.asset,
       COALESCE(SUM(CASE WHEN t.status IN (${completedStatuses.map((s) => `'${s}'`).join(',')}) THEN al.amount::numeric ELSE 0 END), 0) AS available_balance,
       COALESCE(SUM(CASE WHEN t.status IN (${pendingStatuses.map((s) => `'${s}'`).join(',')}) THEN al.amount::numeric ELSE 0 END), 0) AS pending_balance
-    FROM account_ledger al
+    FROM balances b
+    LEFT JOIN account_ledger al ON al.user_id = b.user_id AND al.asset = b.asset
     LEFT JOIN transactions t ON t.id = al.transaction_id
-    GROUP BY al.user_id, al.asset`,
+    GROUP BY b.user_id, b.asset`,
     {
       type: sequelize.QueryTypes.SELECT,
     }
@@ -313,7 +334,7 @@ export async function rebuildBalancesFromLedger() {
     for (const row of ledgerRows) {
       const available = Math.max(0, Number(row.available_balance || 0));
       const pending = Math.max(0, Number(row.pending_balance || 0));
-
+      
       const [account] = await Account.findOrCreate({
         where: { user_id: row.user_id, asset: row.asset },
         defaults: {
@@ -323,10 +344,7 @@ export async function rebuildBalancesFromLedger() {
         transaction,
       });
 
-      const before = {
-        available_balance: Number(account.available_balance),
-        pending_balance: Number(account.pending_balance),
-      };
+      const before = { available_balance: Number(account.available_balance), pending_balance: Number(account.pending_balance) };
       const after = { available_balance: available, pending_balance: pending };
 
       if (before.available_balance !== after.available_balance || before.pending_balance !== after.pending_balance) {
@@ -339,110 +357,30 @@ export async function rebuildBalancesFromLedger() {
   for (const update of updates) {
     await logAuditEvent(AUDIT_ACTIONS.ADMIN_ACTION, {
       action: 'rebuild_balances_from_ledger',
-      user_id: update.user_id,
-      amount: update.after.available_balance - update.before.available_balance,
-      asset: update.asset,
-      metadata: {
-        balance_id: update.balance_id,
-        before: update.before,
-        after: update.after,
-      },
-      severity: 'info',
-    });
-  }
-
-  return {
-    updated_count: updates.length,
-    updates,
-  };
-}
-
-async function fetchTransaction(signature) {
-  return connection.getTransaction(signature, {
-    commitment: 'confirmed',
-    maxSupportedTransactionVersion: 0,
-  });
-}
-
-export async function recoverMissingOnchainDeposits({ walletId, batchSize = 50 } = {}) {
-  if (!walletId) throw new Error('walletId is required');
-
-  const wallet = await Wallet.findByPk(walletId);
-  if (!wallet || !wallet.address) {
-    throw new Error('Wallet not found or missing address');
-  }
-
-  const publicKey = new PublicKey(wallet.address);
-  const results = { processed: 0, skipped: 0, errors: [] };
-  let before;
-
-  while (true) {
-    const options = { limit: batchSize };
-    if (before) options.before = before;
-    const signatures = await connection.getSignaturesForAddress(publicKey, options);
-    if (!signatures || signatures.length === 0) break;
-
-    for (const signatureInfo of signatures) {
-      try {
-        const tx = await fetchTransaction(signatureInfo.signature);
-        if (!tx) {
-          results.skipped += 1;
-          continue;
-        }
-
-        const solAmount = getSolDepositAmount(tx, wallet.address);
-        const usdcAmount = getUsdcDepositAmount(tx, wallet.address);
-        if (solAmount <= 0n && usdcAmount <= 0n) {
-          results.skipped += 1;
-          continue;
-        }
-
-        const asset = usdcAmount > 0n ? 'USDC' : 'SOL';
-        const amount = usdcAmount > 0n ? formatUsdcAmount(usdcAmount) : (Number(solAmount) / 1e9).toFixed(9);
-
-        await processDeposit({
-          wallet_address: wallet.address,
-          tx_hash: signatureInfo.signature,
-          chain: wallet.chain || 'solana',
-          asset,
-          amount,
-          source: 'repair_missing_onchain_deposit',
-          metadata: { wallet_id: wallet.id },
+      user_id: update.user_id: wallet.address,
+            source: 'repair_missing_onchain_deposit',
+          },
         });
-
-        results.processed += 1;
-      } catch (error) {
-        if (String(error.message).includes('TX_HASH_CONFLICT') || String(error.message).includes('already processed')) {
-          results.skipped += 1;
-        } else {
-          results.errors.push({ signature: signatureInfo.signature, error: String(error.message) });
-        }
       }
+
+      before = signatureBatch[signatureBatch.length - 1].signature;
+      if (!before) break;
     }
 
-    before = signatures[signatures.length - 1].signature;
-    if (!before) break;
+    if (typeof before === 'string') {
+      await wallet.update({ last_scanned_signature: before, last_scanned_at: new Date() });
+    }
   }
 
-  await wallet.update({ last_scanned_signature: before, last_scanned_at: new Date() });
-  return results;
+  return { repairs, wallets_scanned: wallets.length };
 }
 
 export async function migrateLegacyLedgerEntries({ batchSize = 500 } = {}) {
-  const tableExists = await sequelize.query(
-    `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'ledger_entries' AND table_schema = 'public') AS exists`,
-    { type: sequelize.QueryTypes.SELECT }
-  );
-
-  if (!tableExists[0]?.exists) {
-    return { migrated_entries: 0, migrated_ids: [], message: 'No legacy ledger_entries table present' };
-  }
-
   const legacyRows = await sequelize.query(
     `SELECT le.id, le.transaction_id, le.debit_account_id, le.credit_account_id, le.amount, le.created_at, t.user_id, COALESCE(t.asset, 'USDC') AS asset, t.reference AS reference_id
       FROM ledger_entries le
       LEFT JOIN transactions t ON t.id = le.transaction_id
-      WHERE COALESCE(le.is_deprecated, FALSE) IS NOT TRUE
+      WHERE le.is_deprecated IS NOT TRUE
       ORDER BY le.created_at ASC
       LIMIT ?`,
     {
@@ -452,17 +390,10 @@ export async function migrateLegacyLedgerEntries({ batchSize = 500 } = {}) {
   );
 
   const migrated = [];
+
   await sequelize.transaction(async (transaction) => {
     for (const row of legacyRows) {
-      const exists = await AccountLedger.findOne({
-        where: {
-          transaction_id: row.transaction_id,
-          debit_account_id: row.debit_account_id,
-          credit_account_id: row.credit_account_id,
-          amount: row.amount,
-        },
-        transaction,
-      });
+      const exists = await AccountLedger.findOne({ where: { transaction_id: row.transaction_id, debit_account_id: row.debit_account_id, credit_account_id: row.credit_account_id, amount: row.amount }, transaction });
       if (exists) continue;
 
       await AccountLedger.create(
@@ -471,6 +402,8 @@ export async function migrateLegacyLedgerEntries({ batchSize = 500 } = {}) {
           user_id: row.user_id,
           wallet_id: null,
           asset: row.asset,
+          debit_account_id: row.debit_account_id,
+          credit_account_id: row.credit_account_id,
           amount: row.amount,
           entry_type: 'legacy',
           reference_id: row.reference_id,
@@ -506,9 +439,9 @@ export async function verifyFinancialIntegrity({ scanBlockchain = false, walletL
   };
 
   const balanceRows = await sequelize.query(
-    `SELECT b.id AS balance_id, b.user_id, b.asset, b.available_balance, b.pending_balance,
-      COALESCE(SUM(CASE WHEN al.credit_account_id = b.id THEN al.amount::numeric ELSE 0 END), 0) AS ledger_credits,
-      COALESCE(SUM(CASE WHEN al.debit_account_id = b.id THEN al.amount::numeric ELSE 0 END), 0) AS ledger_debits
+    `SELECT b.id as balance_id, b.user_id, b.asset, b.available_balance, b.pending_balance,
+      COALESCE(SUM(CASE WHEN al.credit_account_id = b.id THEN al.amount::numeric ELSE 0 END), 0) as ledger_credits,
+      COALESCE(SUM(CASE WHEN al.debit_account_id = b.id THEN al.amount::numeric ELSE 0 END), 0) as ledger_debits
     FROM balances b
     LEFT JOIN account_ledger al ON al.debit_account_id = b.id OR al.credit_account_id = b.id
     GROUP BY b.id, b.user_id, b.asset, b.available_balance, b.pending_balance`,
@@ -518,20 +451,10 @@ export async function verifyFinancialIntegrity({ scanBlockchain = false, walletL
   for (const row of balanceRows) {
     const ledgerBalance = Number(row.ledger_credits) - Number(row.ledger_debits);
     if (Math.abs(Number(row.available_balance) - ledgerBalance) > 0.000001) {
-      issues.balance_mismatches.push({
-        balance_id: row.balance_id,
-        user_id: row.user_id,
-        asset: row.asset,
-        cached: Number(row.available_balance),
-        ledger: ledgerBalance,
-      });
+      issues.balance_mismatches.push({ balance_id: row.balance_id, user_id: row.user_id, asset: row.asset, cached: Number(row.available_balance), ledger: ledgerBalance });
     }
     if (Number(row.available_balance) < 0 || Number(row.pending_balance) < 0) {
-      issues.negative_balances.push({
-        balance_id: row.balance_id,
-        available_balance: Number(row.available_balance),
-        pending_balance: Number(row.pending_balance),
-      });
+      issues.negative_balances.push({ balance_id: row.balance_id, available_balance: Number(row.available_balance), pending_balance: Number(row.pending_balance) });
     }
   }
 
@@ -578,12 +501,7 @@ export async function verifyFinancialIntegrity({ scanBlockchain = false, walletL
       const userLedger = await getDerivedLedgerBalances(wallet.user_id);
       const ledgerAsset = userLedger['USDC'] ?? 0;
       if (blockchain.usdc !== null && blockchain.usdc < ledgerAsset) {
-        issues.blockchain_shortages.push({
-          wallet_id: wallet.id,
-          address: wallet.address,
-          blockchain_usdc: blockchain.usdc,
-          ledger_usdc: ledgerAsset,
-        });
+        issues.blockchain_shortages.push({ wallet_id: wallet.id, address: wallet.address, blockchain_usdc: blockchain.usdc, ledger_usdc: ledgerAsset });
       }
     }
   }

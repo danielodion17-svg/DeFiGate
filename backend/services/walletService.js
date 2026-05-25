@@ -116,6 +116,11 @@ export async function getOrCreateWallet(userId, chainType = 'solana', walletData
   return await insertOrFetchWallet(userId, walletPayload);
 }
 
+export async function getCanonicalWalletByWalletId(walletId) {
+  if (!walletId) return null;
+  return Wallet.findByPk(walletId);
+}
+
 async function createPrivyWallet(chainType = 'solana') {
   if (!PRIVY_APP_ID || !PRIVY_APP_SECRET) {
     throw new Error('Privy credentials are not configured');
