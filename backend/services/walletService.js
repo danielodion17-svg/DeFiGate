@@ -115,7 +115,7 @@ export async function getOrCreateWallet(userId, chainType = 'solana', walletData
 
   return await insertOrFetchWallet(userId, walletPayload);
 }
-
+pp
 export async function getCanonicalWalletByWalletId(walletId) {
   if (!walletId) return null;
   return Wallet.findByPk(walletId);
