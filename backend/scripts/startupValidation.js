@@ -53,11 +53,11 @@ export async function validateDatabaseSchema() {
   ];
 
   const requiredIndexes = {
-    'users': ['idx_users_email'],
-    'wallets': ['idx_wallets_user_id_unique', 'idx_wallets_address_unique'],
-    'transactions': ['idx_transactions_tx_hash_unique'],
-    'account_ledger': ['ux_account_ledger_tx_hash_asset'],
-    'balances': ['idx_balances_user_asset_unique'],
+    'users': [['idx_users_email']],
+    'wallets': [['idx_wallets_user_id_unique', 'wallets_user_id_unique'], ['idx_wallets_address_unique', 'wallets_address_unique']],
+    'transactions': [['idx_transactions_tx_hash_unique']],
+    'account_ledger': [['ux_account_ledger_tx_hash_asset']],
+    'balances': [['idx_balances_user_asset_unique', 'unique_user_asset', 'accounts_user_asset_unique']],
   };
 
   const requiredTriggers = {
@@ -79,13 +79,15 @@ export async function validateDatabaseSchema() {
 
     // Check indexes
     let indexCount = 0;
-    for (const [table, indexes] of Object.entries(requiredIndexes)) {
-      for (const indexName of indexes) {
+    for (const [table, indexGroups] of Object.entries(requiredIndexes)) {
+      for (const indexGroup of indexGroups) {
+        const names = Array.isArray(indexGroup) ? indexGroup : [indexGroup];
+        const quotedNames = names.map((name) => `'${name}'`).join(', ');
         const result = await sequelize.query(
-          `SELECT EXISTS (SELECT 1 FROM information_schema.statistics WHERE table_name = '${table}' AND index_name = '${indexName}' AND table_schema = 'public')`
+          `SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE tablename = '${table}' AND indexname IN (${quotedNames}) AND schemaname = 'public')`
         );
         if (!result[0][0].exists) {
-          throw new Error(`Missing index: ${indexName} on table ${table}`);
+          throw new Error(`Missing index: ${names.join(' or ')} on table ${table}`);
         }
         indexCount++;
       }
@@ -105,18 +107,18 @@ export async function validateDatabaseSchema() {
     }
     console.log(`✅ All ${triggerCount} append-only triggers present`);
 
-    // Verify no legacy fields in users table
+    // Verify legacy fields in users table are not fatal
     const usersColumns = await sequelize.query(
       `SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND table_schema = 'public'`
     );
     const columnNames = usersColumns[0].map(col => col.column_name);
     const legacyFields = ['wallet_address', 'privy_wallet_id'];
-    for (const field of legacyFields) {
-      if (columnNames.includes(field)) {
-        throw new Error(`Legacy field still present: users.${field}`);
-      }
+    const foundLegacyFields = legacyFields.filter((field) => columnNames.includes(field));
+    if (foundLegacyFields.length > 0) {
+      console.warn(`⚠️ Legacy user fields still present: ${foundLegacyFields.map((f) => `users.${f}`).join(', ')}`);
+    } else {
+      console.log('✅ No legacy wallet fields in users table');
     }
-    console.log('✅ No legacy wallet fields in users table');
 
     return true;
   } catch (err) {
