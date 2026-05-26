@@ -38,7 +38,7 @@ export async function getCanonicalWallet(userId, chainType = 'solana') {
   if (!userId) return null;
   const chain = normalizeChain(chainType);
   const wallet = await Wallet.findOne({
-    where: { user_id: userId, chain },
+    where: { user_id: userId, chain, provider: 'privy', is_archived: false },
     order: [['is_primary', 'DESC'], ['created_at', 'ASC']],
   });
   if (wallet) {
@@ -53,7 +53,7 @@ export async function resolveWallet(address, chainType = 'solana') {
     throw new Error('MISSING_WALLET_ADDRESS');
   }
   const chain = normalizeChain(chainType);
-  const wallet = await Wallet.findOne({ where: { address: normalizedAddress, chain } });
+  const wallet = await Wallet.findOne({ where: { address: normalizedAddress, chain, provider: 'privy', is_archived: false } });
   return wallet;
 }
 
@@ -91,16 +91,15 @@ export async function getOrCreateWallet(userId, chainType = 'solana', walletData
     return existingWallet;
   }
 
-  const provider = String(walletData.provider || 'local').trim().toLowerCase();
-  const providerWalletId = walletData.provider_wallet_id || walletData.id || null;
-  let address = validateAddress(walletData.address || walletData.accounts?.[0]?.address || '');
+  const provider = String(walletData.provider || '').trim().toLowerCase();
+  if (provider !== 'privy') {
+    throw new Error('ONLY_PRIVY_WALLET_CREATION_ALLOWED');
+  }
 
-  if (!address) {
-    if (provider === 'local') {
-      address = `local:${userId}`;
-    } else {
-      throw new Error('MISSING_WALLET_ADDRESS');
-    }
+  const providerWalletId = walletData.provider_wallet_id || walletData.id || null;
+  const address = validateAddress(walletData.address || walletData.accounts?.[0]?.address || '');
+  if (!providerWalletId || !address) {
+    throw new Error('MISSING_PRIVY_WALLET_DATA');
   }
 
   const walletPayload = {
@@ -115,7 +114,7 @@ export async function getOrCreateWallet(userId, chainType = 'solana', walletData
 
   return await insertOrFetchWallet(userId, walletPayload);
 }
-pp
+
 export async function getCanonicalWalletByWalletId(walletId) {
   if (!walletId) return null;
   return Wallet.findByPk(walletId);

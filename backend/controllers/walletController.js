@@ -15,7 +15,6 @@ import {
   getCanonicalWallet,
   getCanonicalWalletByWalletId,
   getAllCanonicalWallets,
-  getOrCreateWallet,
   createPrivyWalletForUser,
   syncPrivyWallet,
 } from "../services/walletService.js";
@@ -78,16 +77,10 @@ export const createEmbeddedWallet = async (req, res) => {
     }
 
     if (!isPrivyEnabled) {
-      const wallet = await getOrCreateWallet(userId, chainType, {
-        provider: 'local',
-      });
-      if (!wallet) {
-        return res.status(500).json({ ok: false, error: 'Failed to create local wallet placeholder' });
+        return res.status(503).json({ ok: false, error: 'Privy wallet creation is disabled or missing credentials' });
       }
-      return res.json({ ok: true, data: wallet });
-    }
 
-    const wallet = await createPrivyWalletForUser(userId, chainType);
+      const wallet = await createPrivyWalletForUser(userId, chainType);
     if (!wallet) {
       return res.status(500).json({ ok: false, error: 'Failed to create wallet' });
     }
