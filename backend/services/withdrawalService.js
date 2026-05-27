@@ -14,6 +14,7 @@ import { sequelize, Transaction, Account, Wallet } from '../models/index.js';
 import { creditAccount, reserveFunds, releaseFunds, commitReservedFunds } from '../services/balanceService.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 import { getTransaction, getRpcConnection } from './solanaRpcClient.js';
+import { ensureMinimumGasBalance } from './gasWalletService.js';
 
 dotenv.config();
 
@@ -341,6 +342,7 @@ export async function rejectWithdrawal(transactionId, operatorUserId, reason = '
 }
 
 async function broadcastApprovedWithdrawal(transactionId, operatorUserId, requestMeta = {}) {
+  await ensureMinimumGasBalance();
   const withdrawalTransaction = await Transaction.findByPk(transactionId);
   if (!withdrawalTransaction) {
     throw new Error('Withdrawal not found');
@@ -487,6 +489,61 @@ async function broadcastApprovedWithdrawal(transactionId, operatorUserId, reques
     txHash,
     message: 'Withdrawal broadcasted successfully, awaiting confirmation',
   };
+}
+
+
+export async function retryFailedWithdrawal(transactionId, operatorUserId, requestMeta = {}) {
+  return await sequelize.transaction(async (tx) => {
+    const withdrawalTransaction = await Transaction.findOne({
+      where: { id: transactionId, type: 'withdrawal' },
+      transaction: tx,
+      lock: tx.LOCK.UPDATE,
+    });
+    if (!withdrawalTransaction) {
+      throw new Error('Withdrawal not found');
+    }
+    if (!['failed', 'rejected'].includes(withdrawalTransaction.status)) {
+      throw new Error('Withdrawal is not retryable');
+    }
+    const amountValue = parseFloat(withdrawalTransaction.amount || 0);
+    const userAccount = await Account.findOne({
+      where: { user_id: withdrawalTransaction.user_id, asset: 'USDC' },
+      transaction: tx,
+      lock: tx.LOCK.UPDATE,
+    });
+    if (!userAccount) {
+      throw new Error('User account not found');
+    }
+    if (Number(userAccount.available_balance) < amountValue) {
+      throw new Error('Insufficient user balance to retry withdrawal');
+    }
+    await reserveFunds(withdrawalTransaction.user_id, amountValue, {
+      asset: 'USDC',
+      transaction: tx,
+    });
+    const beforeStatus = withdrawalTransaction.status;
+    withdrawalTransaction.status = 'approved';
+    withdrawalTransaction.failure_reason = null;
+    withdrawalTransaction.failed_at = null;
+    withdrawalTransaction.broadcasted_at = null;
+    withdrawalTransaction.confirmed_at = null;
+    withdrawalTransaction.tx_hash = null;
+    await withdrawalTransaction.save({ transaction: tx });
+    await logAuditEvent(AUDIT_ACTIONS.ADMIN_ACTION, {
+      user_id: operatorUserId,
+      transaction_id: withdrawalTransaction.id,
+      metadata: {
+        action: 'retry_withdrawal',
+        previous_status: beforeStatus,
+      },
+      request_id: requestMeta.request_id,
+      ip_address: requestMeta.ip_address,
+      user_agent: requestMeta.user_agent,
+      severity: 'warning',
+      before_state: { status: beforeStatus },
+      after_state: { status: withdrawalTransaction.status },
+    });
+  });
 }
 
 export async function getWithdrawalStatus(transactionId, userId) {

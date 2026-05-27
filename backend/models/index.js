@@ -5,6 +5,7 @@ import Transaction from "./Transaction.js";
 import Wallet from "./Wallet.js";
 import AccountLedger from "./AccountLedger.js";
 import AuditLog from "./AuditLog.js";
+import SystemGasWallet from "./SystemGasWallet.js";
 
 // ========== ASSOCIATIONS (CANONICAL ONLY) ==========
 
@@ -36,4 +37,4 @@ AccountLedger.belongsTo(Wallet, { foreignKey: "wallet_id" });
 User.hasMany(AccountLedger, { foreignKey: "user_id", onDelete: "CASCADE" });
 AccountLedger.belongsTo(User, { foreignKey: "user_id" });
 
-export { sequelize, User, Account, Transaction, Wallet, AccountLedger, AuditLog };
+export { sequelize, User, Account, Transaction, Wallet, AccountLedger, AuditLog, SystemGasWallet };

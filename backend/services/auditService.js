@@ -16,6 +16,13 @@ export const AUDIT_ACTIONS = {
   RECONCILIATION_MISMATCH: 'reconciliation_mismatch',
   DEPOSIT_REPROCESSED: 'deposit_reprocessed',
   ADMIN_ACTION: 'admin_action',
+  GAS_WALLET_BALANCE_CHECK: 'gas_wallet_balance_check',
+  GAS_WALLET_FEE_ESTIMATE: 'gas_wallet_fee_estimate',
+  GAS_WALLET_REFILL: 'gas_wallet_refill',
+  GAS_WALLET_ALERT: 'gas_wallet_alert',
+  SOLANA_RPC_FAILURE: 'solana_rpc_failure',
+  SOLANA_RPC_RATE_LIMIT: 'solana_rpc_rate_limit',
+  GAS_WALLET_CREATED: 'gas_wallet_created',
 };
 
 /**

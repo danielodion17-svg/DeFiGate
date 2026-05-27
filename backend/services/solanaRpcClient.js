@@ -1,4 +1,6 @@
 import { Connection, PublicKey } from '@solana/web3.js';
+import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
+import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 
 const rawRpcUrls = (process.env.SOLANA_RPC_URLS || process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com')
   .split(',')
@@ -179,10 +181,23 @@ async function requestRpc(method, args, options = {}) {
           return result;
         } catch (error) {
           lastError = error;
+          const rateLimited = isRateLimitError(error);
+          const metadata = {
+            method,
+            endpoint,
+            attempt: attempt + 1,
+            cycle: cycle + 1,
+            wallet_address: args?.[0] ? normalizeKey(args[0]) : undefined,
+            error: error?.message || String(error),
+          };
+          await logAuditEvent(rateLimited ? AUDIT_ACTIONS.SOLANA_RPC_RATE_LIMIT : AUDIT_ACTIONS.SOLANA_RPC_FAILURE, {
+            metadata,
+            severity: rateLimited ? 'warning' : 'error',
+          });
           if (!isRetryableError(error)) {
             throw error;
           }
-          console.warn('[solanaRpcClient] retryable RPC error', { method, endpoint, attempt: attempt + 1, cycle: cycle + 1, message: error.message });
+          console.warn('[solanaRpcClient] retryable RPC error', metadata);
         }
       }
       if (cycle < maxRetryCycles - 1) {

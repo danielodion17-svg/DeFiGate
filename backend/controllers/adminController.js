@@ -13,10 +13,14 @@ import {
   repairWallet as repairWalletService,
 } from '../services/repairService.js';
 import { approveWithdrawal, rejectWithdrawal, getPendingWithdrawals } from '../services/withdrawalService.js';
+import { retryFailedWithdrawal } from '../services/withdrawalService.js';
 import { Wallet, Transaction, User } from '../models/index.js';
+import { sequelize } from '../models/index.js';
 import { adjustAccount } from '../services/balanceService.js';
 import { logAuditEvent, AUDIT_ACTIONS, getAuditLogs } from '../services/auditService.js';
+import { getSystemGasWalletStatus } from '../services/gasWalletService.js';
 import { respondError, respondSuccess } from '../utils/response.js';
+import { Op } from 'sequelize';
 
 /**
  * POST /admin/reconcile
@@ -243,6 +247,125 @@ export const getAuditLogsEndpoint = async (req, res) => {
   } catch (error) {
     console.error('Audit logs error:', error);
     respondError(res, 500, 'Failed to fetch audit logs', true, error.message);
+  }
+};
+
+export const getAdminDashboard = async (req, res) => {
+  try {
+    const gasWalletStatus = await getSystemGasWalletStatus();
+    const assetLiquidity = await sequelize.query(
+      `SELECT asset, SUM(available_balance::numeric) AS available, SUM(pending_balance::numeric) AS pending
+       FROM balances
+       GROUP BY asset`,
+      { type: sequelize.QueryTypes.SELECT }
+    );
+    const totalLiabilitiesResult = await sequelize.query(
+      `SELECT COALESCE(SUM(amount::numeric), 0) AS total_liabilities FROM account_ledger`,
+      { type: sequelize.QueryTypes.SELECT }
+    );
+    const transactionSummary = await Transaction.findAll({
+      attributes: [
+        'status',
+        [sequelize.fn('COUNT', sequelize.col('id')), 'count'],
+      ],
+      group: ['status'],
+    });
+    const statusCounts = transactionSummary.reduce((acc, row) => {
+      acc[row.status] = Number(row.get('count'));
+      return acc;
+    }, {});
+    respondSuccess(res, {
+      gas_wallet: gasWalletStatus,
+      asset_liquidity: assetLiquidity,
+      total_liabilities: Number(totalLiabilitiesResult?.[0]?.total_liabilities ?? 0),
+      transaction_status_counts: statusCounts,
+    });
+  } catch (error) {
+    console.error('Get admin dashboard error:', error);
+    respondError(res, 500, 'Failed to fetch admin dashboard data', true, error.message);
+  }
+};
+
+export const getWalletHealth = async (req, res) => {
+  try {
+    const wallets = await Wallet.findAll({
+      where: { chain: 'solana', is_archived: false },
+      attributes: ['id', 'address', 'last_scanned_signature', 'last_scanned_at', 'last_synced_at'],
+      order: [['last_synced_at', 'DESC']],
+    });
+    const health = await Promise.all(wallets.map(async (wallet) => {
+      const failureCountResult = await sequelize.query(
+        `SELECT COUNT(*) AS count
+         FROM audit_logs
+         WHERE action = :action
+           AND metadata->>'wallet_address' = :address`,
+        {
+          replacements: { action: AUDIT_ACTIONS.SOLANA_RPC_FAILURE, address: wallet.address },
+          type: sequelize.QueryTypes.SELECT,
+        }
+      );
+      const rateLimitCountResult = await sequelize.query(
+        `SELECT COUNT(*) AS count
+         FROM audit_logs
+         WHERE action = :action
+           AND metadata->>'wallet_address' = :address`,
+        {
+          replacements: { action: AUDIT_ACTIONS.SOLANA_RPC_RATE_LIMIT, address: wallet.address },
+          type: sequelize.QueryTypes.SELECT,
+        }
+      );
+      return {
+        wallet_id: wallet.id,
+        address: wallet.address,
+        last_scanned_signature: wallet.last_scanned_signature,
+        last_scanned_at: wallet.last_scanned_at,
+        last_synced_at: wallet.last_synced_at,
+        rpc_failure_count: Number(failureCountResult?.[0]?.count ?? 0),
+        rate_limit_count: Number(rateLimitCountResult?.[0]?.count ?? 0),
+      };
+    }));
+    respondSuccess(res, { wallets: health });
+  } catch (error) {
+    console.error('Get wallet health error:', error);
+    respondError(res, 500, 'Failed to fetch wallet health', true, error.message);
+  }
+};
+
+export const getTransactions = async (req, res) => {
+  try {
+    const statusQuery = req.query.status;
+    const where = {};
+    if (statusQuery) {
+      where.status = { [Op.in]: statusQuery.split(',').map((s) => s.trim()) };
+    }
+    const transactions = await Transaction.findAll({
+      where,
+      order: [['created_at', 'DESC']],
+      limit: parseInt(req.query.limit, 10) || 100,
+      offset: parseInt(req.query.offset, 10) || 0,
+    });
+    respondSuccess(res, { transactions });
+  } catch (error) {
+    console.error('Get transactions error:', error);
+    respondError(res, 500, 'Failed to fetch transactions', true, error.message);
+  }
+};
+
+export const retryTransaction = async (req, res) => {
+  try {
+    const { transactionId } = req.params;
+    if (!transactionId) {
+      return respondError(res, 400, 'transactionId is required');
+    }
+    const result = await retryFailedWithdrawal(transactionId, req.user.id, {
+      request_id: req.requestId,
+      ip_address: req.ip,
+      user_agent: req.get('User-Agent'),
+    });
+    respondSuccess(res, result, 'Retry executed');
+  } catch (error) {
+    console.error('Retry transaction error:', error);
+    respondError(res, 500, 'Failed to retry transaction', true, error.message);
   }
 };
 
