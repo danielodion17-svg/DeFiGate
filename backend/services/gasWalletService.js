@@ -1,5 +1,5 @@
 import { Keypair, PublicKey, SystemProgram, Transaction } from '@solana/web3.js';
-import { getBalance, getRpcConnection } from './solanaRpcClient.js';
+import { getBalance, getLatestBlockhash, getFeeForMessage, sendRawTransaction, confirmTransaction } from './solanaRpcClient.js';
 import { SystemGasWallet } from '../models/index.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 
@@ -73,9 +73,8 @@ export async function getGasWalletBalance(updateCache = true) {
 
 export async function estimateTransactionFee() {
   const wallet = await getSystemGasWallet();
-  const connection = getRpcConnection();
   const publicKey = new PublicKey(wallet.address);
-  const blockhashResponse = await connection.getLatestBlockhash('confirmed');
+  const blockhashResponse = await getLatestBlockhash('confirmed');
   const transaction = new Transaction({
     feePayer: publicKey,
     recentBlockhash: blockhashResponse.blockhash,
@@ -88,7 +87,7 @@ export async function estimateTransactionFee() {
     })
   );
   try {
-    const feeResponse = await connection.getFeeForMessage(transaction.compileMessage());
+    const feeResponse = await getFeeForMessage(transaction.compileMessage());
     const lamports = Number(feeResponse?.value ?? 0);
     const feeSol = lamports / 1e9;
     await logAuditEvent(AUDIT_ACTIONS.GAS_WALLET_FEE_ESTIMATE, {
@@ -146,8 +145,7 @@ export async function refillGasWalletIfLow() {
   const treasuryKeypair = Keypair.fromSecretKey(secretKey);
   const recipient = new PublicKey(wallet.address);
   const sender = new PublicKey(TREASURY_ADDRESS);
-  const connection = getRpcConnection();
-  const blockhashResponse = await connection.getLatestBlockhash('confirmed');
+  const blockhashResponse = await getLatestBlockhash('confirmed');
 
   const transaction = new Transaction({
     feePayer: sender,
@@ -164,8 +162,8 @@ export async function refillGasWalletIfLow() {
   transaction.sign(treasuryKeypair);
 
   const serialized = transaction.serialize();
-  const signature = await connection.sendRawTransaction(serialized);
-  await connection.confirmTransaction(signature, 'confirmed');
+  const signature = await sendRawTransaction(serialized, { skipPreflight: false, preflightCommitment: 'confirmed' });
+  await confirmTransaction(signature, { commitment: 'confirmed' });
   const updatedBalance = await getGasWalletBalance();
   await wallet.update({ last_refilled_at: new Date(), current_balance: updatedBalance });
 

@@ -13,7 +13,7 @@ import { Op } from 'sequelize';
 import { sequelize, Transaction, Account, Wallet } from '../models/index.js';
 import { creditAccount, reserveFunds, releaseFunds, commitReservedFunds } from '../services/balanceService.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
-import { getTransaction, getRpcConnection } from './solanaRpcClient.js';
+import { getTransaction, getLatestBlockhash } from './solanaRpcClient.js';
 import { ensureMinimumGasBalance } from './gasWalletService.js';
 
 dotenv.config();
@@ -122,7 +122,6 @@ async function buildUSDCTransferTransaction(senderPublicKey, recipientAddress, a
 }
 
 async function sendTransactionViaPrivy(providerWalletId, instructions) {
-  const connection = getRpcConnection();
   const walletResponse = await axios.get(`${PRIVY_BASE}/v1/wallets/${providerWalletId}`, {
     headers: privyHeaders(),
   });
@@ -134,7 +133,7 @@ async function sendTransactionViaPrivy(providerWalletId, instructions) {
   const transaction = new SolanaTransaction();
   transaction.instructions = instructions;
   transaction.feePayer = senderPublicKey;
-  const { blockhash } = await connection.getLatestBlockhash();
+  const { blockhash } = await getLatestBlockhash();
   transaction.recentBlockhash = blockhash;
   const serializedTx = transaction.serialize({
     requireAllSignatures: false,

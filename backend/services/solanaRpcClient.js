@@ -1,6 +1,5 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
-import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 
 const rawRpcUrls = (process.env.SOLANA_RPC_URLS || process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com')
   .split(',')
@@ -267,8 +266,16 @@ export async function getAccountInfo(address, commitment = 'confirmed') {
   return await requestRpc('getAccountInfo', [publicKey, commitment], {});
 }
 
-export async function getLatestBlockhash() {
-  return await requestRpc('getLatestBlockhash', []);
+export async function getLatestBlockhash(commitment = 'confirmed') {
+  return await requestRpc('getLatestBlockhash', [{ commitment }]);
+}
+
+export async function getFeeForMessage(message) {
+  return await requestRpc('getFeeForMessage', [message]);
+}
+
+export async function sendRawTransaction(serializedTransaction, options = {}) {
+  return await requestRpc('sendRawTransaction', [serializedTransaction, options]);
 }
 
 export default {
@@ -281,4 +288,6 @@ export default {
   getTokenAccountBalance,
   getAccountInfo,
   getLatestBlockhash,
+  getFeeForMessage,
+  sendRawTransaction,
 };
