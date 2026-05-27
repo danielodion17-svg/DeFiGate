@@ -54,22 +54,37 @@ function App() {
   const verifyAuth = async () => {
     try {
       const token = localStorage.getItem('authToken');
-      const userId = localStorage.getItem('userId');
-      const userName = localStorage.getItem('userName');
-      const walletAddress = localStorage.getItem('walletAddress');
-
-      if (token && userId) {
-        setUser({
-          id: userId,
-          name: userName,
-          walletAddress: walletAddress,
-        });
-        setShowAuthModal(false);
-      } else {
+      if (!token) {
         setShowAuthModal(true);
+        return;
       }
+
+      const response = await fetch(apiUrl('/me'), {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Authentication validation failed');
+      }
+
+      const responseData = await response.json();
+      const userData = responseData?.data?.user;
+      if (!userData) {
+        throw new Error('Invalid authenticated user response');
+      }
+
+      setUser(userData);
+      setShowAuthModal(false);
+      localStorage.setItem('userId', userData.id);
+      localStorage.setItem('userName', userData.name || userData.email || '');
     } catch (error) {
       console.error('Auth verification error:', error);
+      localStorage.removeItem('authToken');
+      localStorage.removeItem('userId');
+      localStorage.removeItem('userName');
+      setUser(null);
       setShowAuthModal(true);
     }
   };
@@ -102,8 +117,7 @@ function App() {
     setShowAuthModal(false);
     localStorage.setItem('authToken', userData.token);
     localStorage.setItem('userId', userData.id);
-    localStorage.setItem('userName', userData.name);
-    localStorage.setItem('walletAddress', userData.walletAddress);
+    localStorage.setItem('userName', userData.name || userData.email || '');
     showToast('Successfully authenticated!', 'success');
   };
 
@@ -111,7 +125,6 @@ function App() {
     localStorage.removeItem('authToken');
     localStorage.removeItem('userId');
     localStorage.removeItem('userName');
-    localStorage.removeItem('walletAddress');
     setUser(null);
     setShowAuthModal(true);
     setCurrentPage('dashboard');

@@ -8,38 +8,43 @@ const Dashboard = ({ user, onShowToast }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchBalance();
-    fetchTransactions();
+    const fetchData = async () => {
+      setLoading(true);
+      await Promise.all([fetchBalance(), fetchTransactions()]);
+      setLoading(false);
+    };
+
+    fetchData();
   }, []);
 
   const fetchBalance = async () => {
     try {
-      const response = await fetch(apiUrl(`/wallet/balance?address=${user.walletAddress}`), {
+      const response = await fetch(apiUrl('/me/balance'), {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+          Authorization: `Bearer ${localStorage.getItem('authToken')}`,
         },
       });
 
       if (!response.ok) {
-        throw new Error('Failed to fetch balance');
+        throw new Error('Failed to fetch ledger balance');
       }
 
       const data = await response.json();
-      setBalance(parseFloat(data.balance).toFixed(4));
-      setBalanceUSD(parseFloat(data.balanceUSD).toFixed(2));
+      const usdcBalance = data?.data?.balances?.find((item) => item.asset === 'USDC');
+      const rawBalance = parseFloat(usdcBalance?.available_balance || 0);
+      setBalance(rawBalance.toFixed(4));
+      setBalanceUSD(rawBalance.toFixed(2));
     } catch (error) {
       console.error('Balance fetch error:', error);
-      onShowToast('Failed to fetch balance', 'error');
-    } finally {
-      setLoading(false);
+      onShowToast('Failed to fetch ledger balance', 'error');
     }
   };
 
   const fetchTransactions = async () => {
     try {
-      const response = await fetch(apiUrl(`/transfer/history?address=${user.walletAddress}`), {
+      const response = await fetch(apiUrl('/me/transactions'), {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+          Authorization: `Bearer ${localStorage.getItem('authToken')}`,
         },
       });
 
@@ -48,15 +53,20 @@ const Dashboard = ({ user, onShowToast }) => {
       }
 
       const data = await response.json();
-      setTransactions(data.transactions || []);
+      setTransactions(data?.data?.transactions || []);
     } catch (error) {
       console.error('Transactions fetch error:', error);
+      onShowToast('Failed to load transactions', 'error');
     }
   };
 
   const copyToClipboard = async () => {
     try {
-      await navigator.clipboard.writeText(user.walletAddress);
+      const address = user?.wallet?.address || user?.walletAddress || '';
+      if (!address) {
+        throw new Error('No wallet address available');
+      }
+      await navigator.clipboard.writeText(address);
       onShowToast('Wallet address copied!', 'success');
     } catch (error) {
       onShowToast('Failed to copy address', 'error');
@@ -79,7 +89,7 @@ const Dashboard = ({ user, onShowToast }) => {
   return (
     <div className="dashboard-container">
       <div className="network-label">
-        <span className="network-badge">Ethereum Sepolia Testnet</span>
+        <span className="network-badge">Solana Mainnet</span>
       </div>
 
       <div className="balance-section">
@@ -157,7 +167,7 @@ const Dashboard = ({ user, onShowToast }) => {
               >
                 <div>
                   <div style={{ fontWeight: 500 }}>
-                    {tx.type === 'sent' ? '📤 Sent' : '📥 Received'}
+                    {tx.type === 'sent' ? '📤 Sent' : '� Received'}
                   </div>
                   <div style={{
                     color: 'var(--text-muted)',

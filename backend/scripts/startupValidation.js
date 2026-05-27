@@ -14,8 +14,8 @@ const REQUIRED_ENV_VARS = [
 const OPTIONAL_ENV_VARS_WITH_DEFAULTS = {
   'NODE_ENV': 'development',
   'PORT': '5000',
-  'SOLANA_RPC_URL': 'https://api.mainnet-beta.solana.com',
 };
+// Note: Do NOT default SOLANA RPC to a public endpoint. Require SOLANA_RPC_URLS or SOLANA_RPC_URL to be set in production.
 
 /**
  * Validate required environment variables

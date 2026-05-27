@@ -50,11 +50,8 @@ const AuthModal = ({ onAuthenticated, onShowToast }) => {
 
       const { user, token } = response_data.data;
       onAuthenticated({
-        id: user.id,
-        name: user.email,
-        email: user.email,
-        walletAddress: user.walletAddress || null,
-        token: token,
+        ...user,
+        token,
       });
       setLoading(false);
     } catch (error) {
@@ -97,11 +94,8 @@ const AuthModal = ({ onAuthenticated, onShowToast }) => {
 
       const { user, token } = response_data.data;
       onAuthenticated({
-        id: user.id,
-        name: user.email,
-        email: user.email,
-        walletAddress: user.walletAddress || null,
-        token: token,
+        ...user,
+        token,
       });
       setLoading(false);
     } catch (error) {
