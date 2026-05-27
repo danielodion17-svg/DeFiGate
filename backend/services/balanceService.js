@@ -175,6 +175,7 @@ export async function createLedgerEntry({
         amount: normalizedAmount,
         tx_hash: txHash || null,
         metadata: metadata || {},
+        created_at: new Date(),
       },
       { transaction }
     );

@@ -475,7 +475,7 @@ export async function migrateLegacyLedgerEntries({ batchSize = 500 } = {}) {
           entry_type: 'legacy',
           reference_id: row.reference_id,
           metadata: { migrated_from: 'ledger_entries', legacy_id: row.id },
-          created_at: row.created_at,
+          created_at: row.created_at || new Date(),
         },
         { transaction }
       );

@@ -54,8 +54,9 @@ const AccountLedger = sequelize.define(
   },
   {
     tableName: "account_ledger",
-    timestamps: false,
+    timestamps: true,
     createdAt: "created_at",
+    updatedAt: false,
   }
 );
 
