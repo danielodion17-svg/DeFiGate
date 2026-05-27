@@ -1,10 +1,9 @@
-import { Connection, PublicKey } from '@solana/web3.js';
+import { PublicKey } from '@solana/web3.js';
 import { getAllCanonicalWallets } from '../services/walletService.js';
 import { processDeposit } from '../services/depositService.js';
+import { getSignaturesForAddress, getTransaction } from './solanaRpcClient.js';
 
-const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const USDC_MINT_ADDRESS = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
-const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
 
 function isSolanaAddress(address) {
   try {
@@ -78,7 +77,7 @@ function detectDepositPayload(tx, walletAddress) {
 }
 
 async function fetchTransaction(signature) {
-  return await connection.getTransaction(signature, {
+  return await getTransaction(signature, {
     commitment: 'confirmed',
     maxSupportedTransactionVersion: 0,
   });
@@ -93,7 +92,7 @@ async function scanWalletSignatures(wallet) {
   while (true) {
     const options = { limit: batchLimit };
     if (before) options.before = before;
-    const signatures = await connection.getSignaturesForAddress(publicKey, options);
+    const signatures = await getSignaturesForAddress(publicKey, options);
     if (!signatures || signatures.length === 0) break;
     for (const sig of signatures) {
       try {
@@ -137,7 +136,9 @@ export async function checkDeposits() {
   }
 }
 
+const DEPOSIT_DETECTOR_INTERVAL_MS = parseInt(process.env.DEPOSIT_DETECTOR_INTERVAL_MS || String(30 * 1000), 10);
+
 setInterval(() => {
   checkDeposits().catch((error) => console.error('Deposit detector failed:', error?.message || error));
-}, 10000);
+}, DEPOSIT_DETECTOR_INTERVAL_MS);
 checkDeposits().catch((error) => console.error('Initial deposit detector failed:', error?.message || error));

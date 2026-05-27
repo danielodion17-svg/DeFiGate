@@ -2,7 +2,6 @@ import axios from "axios";
 import dotenv from "dotenv";
 import { supabase as supabaseDefault, supabaseAnonClient, supabaseServiceClient, requireServiceClient } from "../config/supabase.js";
 import {
-  Connection,
   PublicKey,
   Transaction,
   SystemProgram,
@@ -26,6 +25,7 @@ import {
   TOKEN_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
+import { getRpcConnection } from "../services/solanaRpcClient.js";
 dotenv.config();
 
 const PRIVY_APP_ID = process.env.PRIVY_APP_ID;
@@ -37,7 +37,6 @@ const inMemoryWallets = new Map();
 const isPrivyEnabled = Boolean(PRIVY_APP_ID && PRIVY_APP_SECRET);
 
 // Solana constants
-const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
 const USDC_MINT = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
 const USDC_DECIMALS = 6;
 
@@ -137,8 +136,8 @@ export const sendTxToAddress = async (req, res) => {
         .json({ ok: false, error: "Invalid wallet identifier for transaction" });
     }
 
-    // Connect to Solana
-    const connection = new Connection(SOLANA_RPC_URL, "confirmed");
+    // Connect to Solana through centralized RPC client
+    const connection = getRpcConnection();
 
     // Get wallet details from Privy
     const walletResponse = await axios.get(

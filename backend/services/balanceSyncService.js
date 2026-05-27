@@ -1,21 +1,25 @@
-import { Connection, PublicKey } from '@solana/web3.js';
+import { PublicKey } from '@solana/web3.js';
 import { User, Account, Wallet, Transaction } from '../models/index.js';
 import { getAppLedgerBalance } from './reconciliationService.js';
 import { getCanonicalWallet, getCanonicalWalletByWalletId, getAllCanonicalWallets } from '../services/walletService.js';
 import { creditAccount, getOrCreateBalance } from '../services/balanceService.js';
 import { processDeposit } from '../services/depositService.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
+import {
+  getBalance,
+  getTokenAccountsByOwner,
+  getTokenAccountBalance,
+  getSignaturesForAddress,
+} from './solanaRpcClient.js';
 
-const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
-const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
 const LAMPORTS_PER_SOL = 1_000_000_000;
 const DEFAULT_SIGNATURE_LOOKBACK = parseInt(process.env.BALANCE_SYNC_SIGNATURE_LIMIT || '50', 10);
 
 async function getOnchainSolBalance(walletAddress) {
   try {
     const publicKey = new PublicKey(walletAddress);
-    const lamports = await connection.getBalance(publicKey, 'confirmed');
+    const lamports = await getBalance(publicKey, 'confirmed');
     return lamports / LAMPORTS_PER_SOL;
   } catch (error) {
     console.error(`getOnchainSolBalance failed for ${walletAddress}`, error?.message || error);
@@ -26,13 +30,13 @@ async function getOnchainSolBalance(walletAddress) {
 async function getOnchainUsdcBalance(walletAddress) {
   try {
     const publicKey = new PublicKey(walletAddress);
-    const tokenAccounts = await connection.getTokenAccountsByOwner(publicKey, {
+    const tokenAccounts = await getTokenAccountsByOwner(publicKey, {
       mint: USDC_MINT,
     });
 
     let totalBaseUnits = 0n;
     for (const tokenAccount of tokenAccounts.value) {
-      const balance = await connection.getTokenAccountBalance(tokenAccount.pubkey, 'confirmed');
+      const balance = await getTokenAccountBalance(tokenAccount.pubkey, 'confirmed');
       const uiAmount = balance?.value?.uiAmount || 0;
       totalBaseUnits += BigInt(Math.round(uiAmount * 1_000_000));
     }
@@ -237,7 +241,7 @@ export async function repairMissingDeposits(options = {}) {
     const publicKey = new PublicKey(wallet.address);
     let signatures;
     try {
-      signatures = await connection.getSignaturesForAddress(publicKey, {
+      signatures = await getSignaturesForAddress(publicKey, {
         limit: DEFAULT_SIGNATURE_LOOKBACK,
       });
     } catch (error) {

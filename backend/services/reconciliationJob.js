@@ -1,15 +1,13 @@
-import { Connection, PublicKey } from '@solana/web3.js';
 import { Op } from 'sequelize';
 import { Wallet, Transaction } from '../models/index.js';
 import { getAllCanonicalWallets } from '../services/walletService.js';
 import { runReconciliation, autoRepairSafeMismatches } from './reconciliationService.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
+import { getBalance } from './solanaRpcClient.js';
 
-const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const RECONCILIATION_INTERVAL_MS = parseInt(process.env.RECONCILIATION_INTERVAL_MS || String(5 * 60 * 1000), 10);
 const SOL_GAS_THRESHOLD = parseFloat(process.env.SOL_GAS_THRESHOLD || '0.15');
 const SOLANA_DECIMALS = 9;
-const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
 
 async function checkSolGasBalances() {
   const wallets = await getAllCanonicalWallets('solana');
@@ -18,7 +16,7 @@ async function checkSolGasBalances() {
     if (!wallet.address) continue;
 
     try {
-      const balanceLamports = await connection.getBalance(new PublicKey(wallet.address), 'confirmed');
+      const balanceLamports = await getBalance(wallet.address, 'confirmed');
       const balanceSol = balanceLamports / 1e9;
       if (balanceSol < SOL_GAS_THRESHOLD) {
         await logAuditEvent(AUDIT_ACTIONS.RECONCILIATION_MISMATCH, {

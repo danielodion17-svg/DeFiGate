@@ -1,4 +1,4 @@
-import { Connection, PublicKey } from '@solana/web3.js';
+import { PublicKey } from '@solana/web3.js';
 import { Op } from 'sequelize';
 import {
   sequelize,
@@ -10,10 +10,15 @@ import {
 } from '../models/index.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 import { processDeposit } from './depositService.js';
+import {
+  getBalance,
+  getTokenAccountsByOwner,
+  getTokenAccountBalance,
+  getSignaturesForAddress,
+  getTransaction,
+} from './solanaRpcClient.js';
 
-const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const USDC_MINT_ADDRESS = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
-const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
 
 function parseTokenAmount(tokenBalance) {
   if (!tokenBalance) return 0n;
@@ -36,17 +41,17 @@ async function getBlockchainBalances(address) {
   const balances = { sol: null, usdc: null };
   try {
     const publicKey = new PublicKey(address);
-    const lamports = await connection.getBalance(publicKey, 'confirmed');
+    const lamports = await getBalance(publicKey, 'confirmed');
     balances.sol = Number(lamports) / 1e9;
 
-    const tokenAccounts = await connection.getTokenAccountsByOwner(publicKey, {
+    const tokenAccounts = await getTokenAccountsByOwner(publicKey, {
       mint: new PublicKey(USDC_MINT_ADDRESS),
     });
 
     let totalUsdc = 0n;
     for (const tokenAccount of tokenAccounts.value) {
-      const tokenBalance = await connection.getTokenAccountBalance(tokenAccount.pubkey);
-      totalUsdc += BigInt(Math.floor((tokenBalance.value.uiAmount || 0) * 1e6));
+      const tokenBalance = await getTokenAccountBalance(tokenAccount.pubkey);
+      totalUsdc += BigInt(Math.floor(tokenBalance.value.uiAmount * 1000000));
     }
 
     balances.usdc = Number(totalUsdc) / 1e6;
@@ -358,7 +363,7 @@ export async function rebuildBalancesFromLedger() {
 }
 
 async function fetchTransaction(signature) {
-  return connection.getTransaction(signature, {
+  return getTransaction(signature, {
     commitment: 'confirmed',
     maxSupportedTransactionVersion: 0,
   });
@@ -379,7 +384,7 @@ export async function recoverMissingOnchainDeposits({ walletId, batchSize = 50 }
   while (true) {
     const options = { limit: batchSize };
     if (before) options.before = before;
-    const signatures = await connection.getSignaturesForAddress(publicKey, options);
+    const signatures = await getSignaturesForAddress(publicKey, options);
     if (!signatures || signatures.length === 0) break;
 
     for (const signatureInfo of signatures) {

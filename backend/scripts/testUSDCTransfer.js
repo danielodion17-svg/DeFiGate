@@ -1,16 +1,17 @@
-import { Connection, PublicKey } from "@solana/web3.js";
+import { PublicKey } from "@solana/web3.js";
 import {
   getAssociatedTokenAddress,
   getAccount,
   TOKEN_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
+import { getRpcConnection } from '../services/solanaRpcClient.js';
 
 // Test script to validate USDC transfer setup
 const USDC_MINT = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
 
 async function testUSDCAta() {
-  const connection = new Connection("https://api.mainnet-beta.solana.com", "confirmed");
+  const connection = getRpcConnection();
 
   // Test with a known USDC holder
   const testWallet = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"); // This is actually the USDC mint, let's use a real wallet

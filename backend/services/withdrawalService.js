@@ -1,4 +1,4 @@
-import { Connection, PublicKey, Transaction as SolanaTransaction } from '@solana/web3.js';
+import { PublicKey, Transaction as SolanaTransaction } from '@solana/web3.js';
 import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
@@ -13,10 +13,10 @@ import { Op } from 'sequelize';
 import { sequelize, Transaction, Account, Wallet } from '../models/index.js';
 import { creditAccount, reserveFunds, releaseFunds, commitReservedFunds } from '../services/balanceService.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
+import { getTransaction, getRpcConnection } from './solanaRpcClient.js';
 
 dotenv.config();
 
-const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const PRIVY_APP_ID = process.env.PRIVY_APP_ID;
 const PRIVY_APP_SECRET = process.env.PRIVY_APP_SECRET;
 const PRIVY_BASE = 'https://api.privy.io';
@@ -46,10 +46,9 @@ async function resolvePrivyWalletId(walletId) {
 }
 
 async function confirmTransaction(txHash, maxRetries = 30) {
-  const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
   for (let i = 0; i < maxRetries; i += 1) {
     try {
-      const tx = await connection.getTransaction(txHash, {
+      const tx = await getTransaction(txHash, {
         commitment: 'confirmed',
         maxSupportedTransactionVersion: 0,
       });
@@ -70,7 +69,7 @@ async function confirmTransaction(txHash, maxRetries = 30) {
 }
 
 async function buildUSDCTransferTransaction(senderPublicKey, recipientAddress, amount) {
-  const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
+  const connection = getRpcConnection();
   const recipientPublicKey = new PublicKey(recipientAddress);
   const senderATA = await getAssociatedTokenAddress(
     USDC_MINT,
@@ -122,7 +121,7 @@ async function buildUSDCTransferTransaction(senderPublicKey, recipientAddress, a
 }
 
 async function sendTransactionViaPrivy(providerWalletId, instructions) {
-  const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
+  const connection = getRpcConnection();
   const walletResponse = await axios.get(`${PRIVY_BASE}/v1/wallets/${providerWalletId}`, {
     headers: privyHeaders(),
   });
