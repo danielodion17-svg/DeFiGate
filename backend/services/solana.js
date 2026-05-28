@@ -1,8 +1,5 @@
 // services/solana.js
 
-import { Connection, clusterApiUrl } from "@solana/web3.js";
+import { getRpcConnection } from './solanaRpcClient.js';
 
-export const connection = new Connection(
-  clusterApiUrl("devnet"),
-  "confirmed"
-);
+export const connection = getRpcConnection();

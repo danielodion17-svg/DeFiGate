@@ -1,20 +1,25 @@
-import { Connection, PublicKey } from '@solana/web3.js';
-import { sequelize, User, Account, Wallet, Transaction, LedgerEntry } from '../models/index.js';
+import { PublicKey } from '@solana/web3.js';
+import { User, Account, Wallet, Transaction } from '../models/index.js';
 import { getAppLedgerBalance } from './reconciliationService.js';
 import { getCanonicalWallet, getCanonicalWalletByWalletId, getAllCanonicalWallets } from '../services/walletService.js';
-import { creditAccount, getOrCreateAccount } from '../services/accountService.js';
+import { creditAccount, getOrCreateBalance } from '../services/balanceService.js';
+import { processDeposit } from '../services/depositService.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
+import {
+  getBalance,
+  getTokenAccountsByOwner,
+  getTokenAccountBalance,
+  getSignaturesForAddress,
+} from './solanaRpcClient.js';
 
-const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
-const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
 const LAMPORTS_PER_SOL = 1_000_000_000;
 const DEFAULT_SIGNATURE_LOOKBACK = parseInt(process.env.BALANCE_SYNC_SIGNATURE_LIMIT || '50', 10);
 
 async function getOnchainSolBalance(walletAddress) {
   try {
     const publicKey = new PublicKey(walletAddress);
-    const lamports = await connection.getBalance(publicKey, 'confirmed');
+    const lamports = await getBalance(publicKey, 'confirmed');
     return lamports / LAMPORTS_PER_SOL;
   } catch (error) {
     console.error(`getOnchainSolBalance failed for ${walletAddress}`, error?.message || error);
@@ -25,13 +30,13 @@ async function getOnchainSolBalance(walletAddress) {
 async function getOnchainUsdcBalance(walletAddress) {
   try {
     const publicKey = new PublicKey(walletAddress);
-    const tokenAccounts = await connection.getTokenAccountsByOwner(publicKey, {
+    const tokenAccounts = await getTokenAccountsByOwner(publicKey, {
       mint: USDC_MINT,
     });
 
     let totalBaseUnits = 0n;
     for (const tokenAccount of tokenAccounts.value) {
-      const balance = await connection.getTokenAccountBalance(tokenAccount.pubkey, 'confirmed');
+      const balance = await getTokenAccountBalance(tokenAccount.pubkey, 'confirmed');
       const uiAmount = balance?.value?.uiAmount || 0;
       totalBaseUnits += BigInt(Math.round(uiAmount * 1_000_000));
     }
@@ -94,58 +99,6 @@ async function ensureUserAccount(userId, asset) {
     },
   });
   return account;
-}
-
-async function ensureSystemAccountForAsset(asset, transaction) {
-  const systemEmail = process.env.SYSTEM_USER_EMAIL || 'system@defigate.internal';
-
-  const [systemUser] = await User.findOrCreate({
-    where: { email: systemEmail },
-    defaults: {
-      name: 'DeFiGate External Reserve',
-      is_verified: true,
-      kyc_status: 'pending',
-      preferred_chain: 'solana',
-    },
-    transaction,
-  });
-
-  const [systemAccount] = await Account.findOrCreate({
-    where: { user_id: systemUser.id, asset },
-    defaults: {
-      available_balance: 0,
-      pending_balance: 0,
-    },
-    transaction,
-  });
-
-  return systemAccount;
-}
-
-async function createDepositTransaction(wallet, amount, asset, txHash, transaction) {
-  return await Transaction.create(
-    {
-      user_id: wallet.user_id,
-      type: 'deposit',
-      amount,
-      asset,
-      status: 'completed',
-      tx_hash: txHash,
-    },
-    { transaction }
-  );
-}
-
-async function createLedgerEntry(transactionId, debitAccountId, creditAccountId, amount, transaction) {
-  return await LedgerEntry.create(
-    {
-      transaction_id: transactionId,
-      debit_account_id: debitAccountId,
-      credit_account_id: creditAccountId,
-      amount,
-    },
-    { transaction }
-  );
 }
 
 export async function syncWalletBalances(wallet) {
@@ -288,7 +241,7 @@ export async function repairMissingDeposits(options = {}) {
     const publicKey = new PublicKey(wallet.address);
     let signatures;
     try {
-      signatures = await connection.getSignaturesForAddress(publicKey, {
+      signatures = await getSignaturesForAddress(publicKey, {
         limit: DEFAULT_SIGNATURE_LOOKBACK,
       });
     } catch (error) {
@@ -298,64 +251,25 @@ export async function repairMissingDeposits(options = {}) {
 
     for (const sig of signatures) {
       const txHash = sig.signature;
-      const existing = await Transaction.findOne({ where: { tx_hash: txHash, type: 'deposit' } });
-      if (existing) continue;
-
-      const tx = await connection.getParsedTransaction(txHash, { commitment: 'confirmed' });
-      if (!tx || !tx.meta || tx.meta.err) continue;
-
-      const { sol, usdc } = getDepositAmountsFromMeta(tx, wallet.address);
-      const txResults = [];
-
-      if (sol > 0n) {
-        const amount = Number(sol) / LAMPORTS_PER_SOL;
-        await sequelize.transaction(async (transaction) => {
-          await getOrCreateAccount(wallet.user_id, 'SOL', transaction);
-          const depositTx = await createDepositTransaction(wallet, amount, 'SOL', txHash, transaction);
-          await creditAccount(wallet.user_id, amount, {
-            asset: 'SOL',
-            walletId: wallet.id,
-            txHash,
-            metadata: {
-              source: 'repair_missing_deposit',
-              transaction_id: depositTx.id,
-            },
-            transaction,
-          });
-          txResults.push({ asset: 'SOL', amount });
-        });
-      }
-
-      if (usdc > 0n) {
-        const amount = Number(usdc) / 1_000_000;
-        await sequelize.transaction(async (transaction) => {
-          await getOrCreateAccount(wallet.user_id, 'USDC', transaction);
-          const depositTx = await createDepositTransaction(wallet, amount, 'USDC', txHash, transaction);
-          await creditAccount(wallet.user_id, amount, {
-            asset: 'USDC',
-            walletId: wallet.id,
-            txHash,
-            metadata: {
-              source: 'repair_missing_deposit',
-              transaction_id: depositTx.id,
-            },
-            transaction,
-          });
-          txResults.push({ asset: 'USDC', amount });
-        });
-      }
-
-      if (txResults.length > 0) {
-        await logAuditEvent(AUDIT_ACTIONS.DEPOSIT_REPROCESSED, {
-          user_id: wallet.user_id,
-          wallet_id: wallet.id,
+      try {
+        const credited = await processDeposit({
+          wallet_address: wallet.address,
           tx_hash: txHash,
-          metadata: {
-            repairs: txResults,
-          },
-          request_id: `repair_deposit_${Date.now()}`,
+          source: 'repair_missing_deposit',
+          chain: 'solana',
         });
-        repairs.push({ wallet_id: wallet.id, tx_hash: txHash, repairs: txResults, status: 'repaired' });
+        if (credited) {
+          await logAuditEvent(AUDIT_ACTIONS.DEPOSIT_REPROCESSED, {
+            user_id: wallet.user_id,
+            wallet_id: wallet.id,
+            tx_hash: txHash,
+            metadata: { source: 'repair_missing_deposit' },
+            request_id: `repair_deposit_${Date.now()}`,
+          });
+          repairs.push({ wallet_id: wallet.id, tx_hash: txHash, status: 'repaired' });
+        }
+      } catch (error) {
+        console.error(`repairMissingDeposits failed for ${txHash} on wallet ${wallet.address}:`, error?.message || error);
       }
     }
   }

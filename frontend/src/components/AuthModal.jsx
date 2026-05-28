@@ -36,7 +36,7 @@ const AuthModal = ({ onAuthenticated, onShowToast }) => {
 
       if (!response.ok) {
         const errorData = await response.json();
-        onShowToast(errorData.message || 'Sign in failed', 'error');
+        onShowToast(errorData.error || errorData.message || 'Sign in failed', 'error');
         setLoading(false);
         return;
       }
@@ -50,11 +50,8 @@ const AuthModal = ({ onAuthenticated, onShowToast }) => {
 
       const { user, token } = response_data.data;
       onAuthenticated({
-        id: user.id,
-        name: user.email,
-        email: user.email,
-        walletAddress: user.walletAddress || null,
-        token: token,
+        ...user,
+        token,
       });
       setLoading(false);
     } catch (error) {
@@ -83,7 +80,7 @@ const AuthModal = ({ onAuthenticated, onShowToast }) => {
 
       if (!response.ok) {
         const errorData = await response.json();
-        onShowToast(errorData.message || 'Sign up failed', 'error');
+        onShowToast(errorData.error || errorData.message || 'Sign up failed', 'error');
         setLoading(false);
         return;
       }
@@ -97,11 +94,8 @@ const AuthModal = ({ onAuthenticated, onShowToast }) => {
 
       const { user, token } = response_data.data;
       onAuthenticated({
-        id: user.id,
-        name: user.email,
-        email: user.email,
-        walletAddress: user.walletAddress || null,
-        token: token,
+        ...user,
+        token,
       });
       setLoading(false);
     } catch (error) {

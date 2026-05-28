@@ -21,6 +21,7 @@ import adminRoutes from "./routes/admin.js";
 import { requestContext } from "./middleware/requestContext.js";
 import { startReconciliationJob } from "./services/reconciliationJob.js";
 import { startBalanceSyncJob } from "./services/balanceSyncService.js";
+import { runStartupValidation } from "./scripts/startupValidation.js";
 
 const app = express();
 
@@ -30,21 +31,26 @@ const app = express();
 const hasDatabaseUrl = Boolean(
   process.env.SUPABASE_DATABASE_URL || process.env.DATABASE_URL || process.env.LOCAL_DATABASE_URL
 );
-const hasSupabaseApi = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+const hasSupabaseUrl = Boolean(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL);
+const hasSupabaseServiceKey = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-if (!hasDatabaseUrl && !hasSupabaseApi) {
+if (!hasDatabaseUrl && !hasSupabaseUrl) {
   console.error(
     "❌ Missing database configuration. Set SUPABASE_DATABASE_URL or DATABASE_URL (and optionally SUPABASE_URL with SUPABASE_SERVICE_ROLE_KEY for Supabase JS client access)."
   );
   process.exit(1);
 }
 
-// In production require Supabase service role key for server-side operations
-if (process.env.NODE_ENV === 'production') {
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    console.error('❌ In production, SUPABASE_SERVICE_ROLE_KEY must be set for secure Supabase access');
-    process.exit(1);
-  }
+if (hasSupabaseUrl && !hasSupabaseServiceKey) {
+  console.warn(
+    '⚠️ SUPABASE_SERVICE_ROLE_KEY not set. Supabase admin/write operations will be disabled; read-only access may still work if anon keys are configured.'
+  );
+}
+
+if (process.env.NODE_ENV === 'production' && !hasSupabaseServiceKey) {
+  console.warn(
+    '⚠️ Running in production without SUPABASE_SERVICE_ROLE_KEY. Service-role protected Supabase operations will fail at runtime with controlled errors.'
+  );
 }
 
 // ======================
@@ -94,9 +100,12 @@ const PORT = process.env.PORT || 5000;
 
 (async () => {
   try {
+    // Run startup validations first
+    await runStartupValidation();
+
     await sequelize.authenticate();
     console.log("✅ Database connected");
-    if (hasSupabaseApi) {
+    if (hasSupabaseUrl) {
       const { supabase } = await import('./config/supabase.js');
       // Trigger Supabase client initialization and verification during startup.
       if (supabase) {
@@ -104,17 +113,26 @@ const PORT = process.env.PORT || 5000;
       }
     }
 
-    if (process.env.AUTO_RUN_MIGRATIONS === 'true') {
-      console.log('🛠️ AUTO_RUN_MIGRATIONS enabled, applying database migrations');
+    const shouldAutoRunMigrations = process.env.AUTO_RUN_MIGRATIONS !== 'false' && process.env.NODE_ENV !== 'production';
+    if (shouldAutoRunMigrations) {
+      console.log('🛠️ AUTO_RUN_MIGRATIONS enabled by default in development. Applying database migrations');
       const { default: runMigrations } = await import('./scripts/runMigrations.js');
       const success = await runMigrations();
       if (!success) {
         throw new Error('Database migrations failed during startup');
       }
+    } else {
+      console.log('ℹ️ Skipping database migrations on startup. Set AUTO_RUN_MIGRATIONS=true to enable.');
     }
 
-    await sequelize.sync({ alter: process.env.NODE_ENV === "development" });
-    console.log("✅ Models synced");
+    if (process.env.SEQUELIZE_SYNC === 'true') {
+      const syncOptions = { alter: process.env.NODE_ENV !== 'production' };
+      console.log(`🛠️ Sequelize sync mode: alter=${syncOptions.alter}`);
+      await sequelize.sync(syncOptions);
+      console.log('✅ Models synced');
+    } else {
+      console.log('ℹ️ Sequelize sync skipped. Set SEQUELIZE_SYNC=true to enable model synchronization.');
+    }
 
     await import("./services/depositDetector.js");
     startReconciliationJob({ requestId: `startup-${Date.now()}` });
