@@ -1,6 +1,6 @@
 import Transaction from "../models/Transaction.js";
 import { sequelize } from "../models/index.js";
-import { creditAccount, getDerivedBalance } from "../services/accountService.js";
+import { creditAccount, getDerivedBalance } from "../services/balanceService.js";
 
 export const depositTestFunds = async (req, res) => {
   const userId = req.user?.id;

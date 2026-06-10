@@ -11,7 +11,7 @@ router.post("/lookup", authenticate, transfer.lookupRecipient);
 router.post("/initiate", authenticate, requireNotFrozen, transfer.initiateTransfer);
 router.post("/confirm", authenticate, requireNotFrozen, transfer.confirmTransfer);
 router.get("/history", authenticate, transfer.getTransferHistory);
-router.post("/withdraw", authenticate, requireNotFrozen, transfer.withdraw);
-router.get("/withdraw/:transactionId", authenticate, transfer.getWithdrawalStatusController);
+router.post("/withdraw", authenticate, requireNotFrozen, transfer.initiateWithdrawal);
+router.get("/withdraw/:transactionId", authenticate, transfer.getWithdrawalStatusEndpoint);
 
 export default router;

@@ -47,7 +47,7 @@ const Account = sequelize.define(
       {
         unique: true,
         fields: ["user_id", "asset"],
-        name: "accounts_user_asset_unique",
+        name: "idx_balances_user_asset_unique",
       },
     ],
   }

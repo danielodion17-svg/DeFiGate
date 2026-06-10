@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import logoImg from '../assets/logo.png';
 
 const TopNav = ({ user, theme, toggleTheme, onLogout, backendStatus }) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const isAdminRoute = location.pathname.startsWith('/admin');
 
   const getUserInitial = () => {
     return user?.name?.charAt(0)?.toUpperCase() || 'U';
@@ -72,7 +74,7 @@ const TopNav = ({ user, theme, toggleTheme, onLogout, backendStatus }) => {
               {(user?.role === 'admin' || user?.role === 'support') && (
                 <button
                   onClick={() => {
-                    navigate('/admin');
+                    navigate(isAdminRoute ? '/' : '/admin');
                     setShowProfileMenu(false);
                   }}
                   style={{
@@ -89,7 +91,7 @@ const TopNav = ({ user, theme, toggleTheme, onLogout, backendStatus }) => {
                     transition: 'background 0.2s ease',
                   }}
                 >
-                  Admin Portal
+                  {isAdminRoute ? 'User Portal' : 'Admin Portal'}
                 </button>
               )}
               <button

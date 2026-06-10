@@ -92,7 +92,6 @@ function App() {
       let data;
       try {
         const text = await res.text();
-        console.log('Raw response:', text);
         data = JSON.parse(text);
       } catch (jsonErr) {
         console.error('Invalid JSON response:', jsonErr);

@@ -1,12 +1,26 @@
 // controllers/adminController.js
 import { runReconciliation, autoRepairSafeMismatches } from '../services/reconciliationService.js';
 import { repairMissingDeposits } from '../services/balanceSyncService.js';
-import { processDeposit } from '../services/depositDetector.js';
+import { processDeposit } from '../services/depositService.js';
+import {
+  generateForensicReport,
+  archiveDuplicateWallets,
+  backfillCanonicalWallets,
+  rebuildBalancesFromLedger,
+  recoverMissingOnchainDeposits,
+  migrateLegacyLedgerEntries,
+  verifyFinancialIntegrity,
+  repairWallet as repairWalletService,
+} from '../services/repairService.js';
 import { approveWithdrawal, rejectWithdrawal, getPendingWithdrawals } from '../services/withdrawalService.js';
+import { retryFailedWithdrawal } from '../services/withdrawalService.js';
 import { Wallet, Transaction, User } from '../models/index.js';
-import { adjustAccount } from '../services/accountService.js';
+import { sequelize } from '../models/index.js';
+import { adjustAccount } from '../services/balanceService.js';
 import { logAuditEvent, AUDIT_ACTIONS, getAuditLogs } from '../services/auditService.js';
+import { getSystemGasWalletStatus } from '../services/gasWalletService.js';
 import { respondError, respondSuccess } from '../utils/response.js';
+import { Op } from 'sequelize';
 
 /**
  * POST /admin/reconcile
@@ -122,7 +136,12 @@ export const reprocessDeposit = async (req, res) => {
       if (!wallet.address) continue;
 
       try {
-        const credited = await processDeposit(wallet, txHash);
+        const credited = await processDeposit({
+          wallet_address: wallet.address,
+          tx_hash: txHash,
+          source: 'admin_reprocess',
+          chain: 'solana',
+        });
         if (credited) {
           processed = true;
           processedWallet = wallet;
@@ -231,6 +250,125 @@ export const getAuditLogsEndpoint = async (req, res) => {
   }
 };
 
+export const getAdminDashboard = async (req, res) => {
+  try {
+    const gasWalletStatus = await getSystemGasWalletStatus();
+    const assetLiquidity = await sequelize.query(
+      `SELECT asset, SUM(available_balance::numeric) AS available, SUM(pending_balance::numeric) AS pending
+       FROM balances
+       GROUP BY asset`,
+      { type: sequelize.QueryTypes.SELECT }
+    );
+    const totalLiabilitiesResult = await sequelize.query(
+      `SELECT COALESCE(SUM(amount::numeric), 0) AS total_liabilities FROM account_ledger`,
+      { type: sequelize.QueryTypes.SELECT }
+    );
+    const transactionSummary = await Transaction.findAll({
+      attributes: [
+        'status',
+        [sequelize.fn('COUNT', sequelize.col('id')), 'count'],
+      ],
+      group: ['status'],
+    });
+    const statusCounts = transactionSummary.reduce((acc, row) => {
+      acc[row.status] = Number(row.get('count'));
+      return acc;
+    }, {});
+    respondSuccess(res, {
+      gas_wallet: gasWalletStatus,
+      asset_liquidity: assetLiquidity,
+      total_liabilities: Number(totalLiabilitiesResult?.[0]?.total_liabilities ?? 0),
+      transaction_status_counts: statusCounts,
+    });
+  } catch (error) {
+    console.error('Get admin dashboard error:', error);
+    respondError(res, 500, 'Failed to fetch admin dashboard data', true, error.message);
+  }
+};
+
+export const getWalletHealth = async (req, res) => {
+  try {
+    const wallets = await Wallet.findAll({
+      where: { chain: 'solana', is_archived: false },
+      attributes: ['id', 'address', 'last_scanned_signature', 'last_scanned_at', 'last_synced_at'],
+      order: [['last_synced_at', 'DESC']],
+    });
+    const health = await Promise.all(wallets.map(async (wallet) => {
+      const failureCountResult = await sequelize.query(
+        `SELECT COUNT(*) AS count
+         FROM audit_logs
+         WHERE action = :action
+           AND metadata->>'wallet_address' = :address`,
+        {
+          replacements: { action: AUDIT_ACTIONS.SOLANA_RPC_FAILURE, address: wallet.address },
+          type: sequelize.QueryTypes.SELECT,
+        }
+      );
+      const rateLimitCountResult = await sequelize.query(
+        `SELECT COUNT(*) AS count
+         FROM audit_logs
+         WHERE action = :action
+           AND metadata->>'wallet_address' = :address`,
+        {
+          replacements: { action: AUDIT_ACTIONS.SOLANA_RPC_RATE_LIMIT, address: wallet.address },
+          type: sequelize.QueryTypes.SELECT,
+        }
+      );
+      return {
+        wallet_id: wallet.id,
+        address: wallet.address,
+        last_scanned_signature: wallet.last_scanned_signature,
+        last_scanned_at: wallet.last_scanned_at,
+        last_synced_at: wallet.last_synced_at,
+        rpc_failure_count: Number(failureCountResult?.[0]?.count ?? 0),
+        rate_limit_count: Number(rateLimitCountResult?.[0]?.count ?? 0),
+      };
+    }));
+    respondSuccess(res, { wallets: health });
+  } catch (error) {
+    console.error('Get wallet health error:', error);
+    respondError(res, 500, 'Failed to fetch wallet health', true, error.message);
+  }
+};
+
+export const getTransactions = async (req, res) => {
+  try {
+    const statusQuery = req.query.status;
+    const where = {};
+    if (statusQuery) {
+      where.status = { [Op.in]: statusQuery.split(',').map((s) => s.trim()) };
+    }
+    const transactions = await Transaction.findAll({
+      where,
+      order: [['created_at', 'DESC']],
+      limit: parseInt(req.query.limit, 10) || 100,
+      offset: parseInt(req.query.offset, 10) || 0,
+    });
+    respondSuccess(res, { transactions });
+  } catch (error) {
+    console.error('Get transactions error:', error);
+    respondError(res, 500, 'Failed to fetch transactions', true, error.message);
+  }
+};
+
+export const retryTransaction = async (req, res) => {
+  try {
+    const { transactionId } = req.params;
+    if (!transactionId) {
+      return respondError(res, 400, 'transactionId is required');
+    }
+    const result = await retryFailedWithdrawal(transactionId, req.user.id, {
+      request_id: req.requestId,
+      ip_address: req.ip,
+      user_agent: req.get('User-Agent'),
+    });
+    respondSuccess(res, result, 'Retry executed');
+  } catch (error) {
+    console.error('Retry transaction error:', error);
+    respondError(res, 500, 'Failed to retry transaction', true, error.message);
+  }
+};
+
 export const getUsers = async (req, res) => {
   try {
     const { role, limit = 100, offset = 0 } = req.query;
@@ -296,6 +434,93 @@ export const updateUserRole = async (req, res) => {
   } catch (error) {
     console.error('Update user role error:', error);
     respondError(res, 500, 'Failed to update user role', true, error.message);
+  }
+};
+
+export const getForensicReport = async (req, res) => {
+  try {
+    const report = await generateForensicReport({ scanBlockchain: false });
+    respondSuccess(res, { report });
+  } catch (error) {
+    console.error('Forensic report error:', error);
+    respondError(res, 500, 'Failed to generate forensic report', true, error.message);
+  }
+};
+
+export const archiveDuplicateWalletsController = async (req, res) => {
+  try {
+    const result = await archiveDuplicateWallets();
+    respondSuccess(res, { result });
+  } catch (error) {
+    console.error('Archive duplicate wallets error:', error);
+    respondError(res, 500, 'Failed to archive duplicate wallets', true, error.message);
+  }
+};
+
+export const backfillWalletRelations = async (req, res) => {
+  try {
+    const result = await backfillCanonicalWallets();
+    respondSuccess(res, { result });
+  } catch (error) {
+    console.error('Backfill wallet relations error:', error);
+    respondError(res, 500, 'Failed to backfill wallet relations', true, error.message);
+  }
+};
+
+export const rebuildBalances = async (req, res) => {
+  try {
+    const result = await rebuildBalancesFromLedger();
+    respondSuccess(res, { result });
+  } catch (error) {
+    console.error('Rebuild balances error:', error);
+    respondError(res, 500, 'Failed to rebuild balances', true, error.message);
+  }
+};
+
+export const scanWalletHistory = async (req, res) => {
+  try {
+    const { walletId } = req.params;
+    if (!walletId) return respondError(res, 400, 'walletId is required');
+    const result = await recoverMissingOnchainDeposits({ walletId });
+    respondSuccess(res, { result });
+  } catch (error) {
+    console.error('Scan wallet history error:', error);
+    respondError(res, 500, 'Failed to scan wallet history', true, error.message);
+  }
+};
+
+export const migrateLegacyLedger = async (req, res) => {
+  try {
+    const result = await migrateLegacyLedgerEntries();
+    respondSuccess(res, { result });
+  } catch (error) {
+    console.error('Migrate legacy ledger error:', error);
+    respondError(res, 500, 'Failed to migrate legacy ledger entries', true, error.message);
+  }
+};
+
+export const repairWalletEndpoint = async (req, res) => {
+  try {
+    const { walletId } = req.params;
+    if (!walletId) {
+      return respondError(res, 400, 'walletId is required');
+    }
+
+    const result = await repairWalletService(walletId);
+    respondSuccess(res, { result });
+  } catch (error) {
+    console.error('Repair wallet error:', error);
+    respondError(res, 500, 'Failed to repair wallet', true, error.message);
+  }
+};
+
+export const getFinancialIntegrityReport = async (req, res) => {
+  try {
+    const report = await verifyFinancialIntegrity({ scanBlockchain: req.query.scanBlockchain === 'true' });
+    respondSuccess(res, { report });
+  } catch (error) {
+    console.error('Financial integrity report error:', error);
+    respondError(res, 500, 'Failed to generate financial integrity report', true, error.message);
   }
 };
 

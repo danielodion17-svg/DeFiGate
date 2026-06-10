@@ -1,14 +1,18 @@
 // services/reconciliationService.js
-import { Connection, PublicKey } from '@solana/web3.js';
+import { PublicKey } from '@solana/web3.js';
 import { sequelize, User, Account, Transaction, Wallet, AuditLog } from '../models/index.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 import { getCanonicalWallet, getCanonicalWalletByWalletId, getAllCanonicalWallets } from '../services/walletService.js';
-import { getDerivedBalance, creditAccount, getOrCreateAccount } from '../services/accountService.js';
+import { getDerivedBalance, creditAccount, getOrCreateBalance } from '../services/balanceService.js';
+import {
+  getBalance,
+  getTokenAccountsByOwner,
+  getTokenAccountBalance,
+  getAccountInfo,
+} from './solanaRpcClient.js';
 import { Op } from 'sequelize';
 
-const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
-const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
 
 // SOL Constants
 const SOL_DECIMALS = 9;
@@ -20,7 +24,7 @@ const LAMPORTS_PER_SOL = 1_000_000_000;
 async function getBlockchainSolBalance(walletAddress) {
   try {
     const publicKey = new PublicKey(walletAddress);
-    const balanceLamports = await connection.getBalance(publicKey, 'confirmed');
+    const balanceLamports = await getBalance(publicKey, 'confirmed');
     const balanceSol = balanceLamports / LAMPORTS_PER_SOL;
     return balanceSol;
   } catch (error) {
@@ -35,15 +39,15 @@ async function getBlockchainSolBalance(walletAddress) {
 async function getBlockchainUSDCBalance(walletAddress) {
   try {
     const publicKey = new PublicKey(walletAddress);
-    const tokenAccounts = await connection.getTokenAccountsByOwner(publicKey, {
+    const tokenAccounts = await getTokenAccountsByOwner(publicKey, {
       mint: USDC_MINT,
     });
 
     let totalBalance = 0n;
     for (const tokenAccount of tokenAccounts.value) {
-      const accountInfo = await connection.getAccountInfo(tokenAccount.account.owner);
+      const accountInfo = await getAccountInfo(tokenAccount.pubkey);
       if (accountInfo) {
-        const balance = await connection.getTokenAccountBalance(tokenAccount.pubkey);
+        const balance = await getTokenAccountBalance(tokenAccount.pubkey);
         if (balance.value.uiAmount) {
           totalBalance += BigInt(Math.floor(balance.value.uiAmount * 1000000)); // Convert to base units
         }
@@ -338,7 +342,7 @@ export async function autoRepairSafeMismatches() {
             tx_hash: `repair_${Date.now()}_${wallet.id}_${asset}`,
           }, { transaction });
 
-          await getOrCreateAccount(wallet.user_id, asset, transaction);
+          await getOrCreateBalance(wallet.user_id, asset, transaction);
           await creditAccount(wallet.user_id, result.difference.toString(), {
             asset,
             walletId: wallet.id,

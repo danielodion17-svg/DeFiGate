@@ -57,7 +57,16 @@ const Wallet = sequelize.define(
     is_primary: {
       type: DataTypes.BOOLEAN,
       allowNull: false,
-      defaultValue: true,
+      defaultValue: false,
+    },
+    is_archived: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+    archived_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
     },
   },
   {
@@ -68,8 +77,13 @@ const Wallet = sequelize.define(
     indexes: [
       {
         unique: true,
-        fields: ["user_id", "chain"],
-        name: "wallets_user_chain_unique",
+        fields: ["user_id"],
+        name: "wallets_user_id_unique",
+      },
+      {
+        unique: true,
+        fields: ["address"],
+        name: "wallets_address_unique",
       },
     ],
   }

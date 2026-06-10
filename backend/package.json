@@ -11,6 +11,13 @@
     "init:db": "node scripts/initDb.js",
     "migrate": "node scripts/runMigrations.js",
     "test:ledger": "node scripts/testLedgerRpc.js",
+    "repair:forensic": "node scripts/repairPhase.js forensic-report",
+    "repair:archive-wallets": "node scripts/repairPhase.js archive-duplicates",
+    "repair:backfill-wallets": "node scripts/repairPhase.js backfill-wallets",
+    "repair:rebuild-balances": "node scripts/repairPhase.js rebuild-balances",
+    "repair:scan-wallet-history": "node scripts/repairPhase.js scan-wallet-history",
+    "repair:migrate-ledger": "node scripts/repairPhase.js migrate-ledger",
+    "repair:verify": "node scripts/repairPhase.js verify-integrity",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
