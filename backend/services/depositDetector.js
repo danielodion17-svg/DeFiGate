@@ -136,9 +136,6 @@ export async function checkDeposits() {
   }
 }
 
-const DEPOSIT_DETECTOR_INTERVAL_MS = parseInt(process.env.DEPOSIT_DETECTOR_INTERVAL_MS || String(30 * 1000), 10);
-
-setInterval(() => {
-  checkDeposits().catch((error) => console.error('Deposit detector failed:', error?.message || error));
-}, DEPOSIT_DETECTOR_INTERVAL_MS);
-checkDeposits().catch((error) => console.error('Initial deposit detector failed:', error?.message || error));
+export async function runDepositDetectionJob() {
+  await checkDeposits();
+}

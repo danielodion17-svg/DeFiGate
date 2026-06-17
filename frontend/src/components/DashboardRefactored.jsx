@@ -110,7 +110,7 @@ function DashboardRefactored({ currentUser, navigateTo }) {
       {/* Network/Chain Label */}
       {wallet && (
         <div className="network-label">
-          <span className="network-badge">{wallet.chain?.toUpperCase() || 'ETHEREUM'}</span>
+          <span className="network-badge">{wallet.chain?.toUpperCase() || 'SOLANA'}</span>
         </div>
       )}
 
@@ -175,7 +175,7 @@ function DashboardRefactored({ currentUser, navigateTo }) {
           {wallet && (
             <div className="status-item">
               <span className="status-label">Wallet</span>
-              <span className="status-value">{wallet.chain || 'Ethereum'}</span>
+              <span className="status-value">{wallet.chain || 'Solana'}</span>
             </div>
           )}
         </div>

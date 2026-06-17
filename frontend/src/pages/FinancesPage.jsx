@@ -9,27 +9,19 @@ const FinancesPage = ({ currentUser, navigateTo }) => {
     // Mock data - in real app, this would fetch from API
     const mockAssets = [
       {
-        symbol: 'ETH',
-        name: 'Ethereum',
-        balance: 0.5,
-        value: 1750.00,
-        change24h: 2.5,
-        icon: '⟠'
-      },
-      {
-        symbol: 'USDT',
-        name: 'Tether',
-        balance: 500,
-        value: 500.00,
-        change24h: 0.1,
-        icon: '💲'
+        symbol: 'SOL',
+        name: 'Solana',
+        balance: 12.345,
+        value: 460.00,
+        change24h: 1.8,
+        icon: '◎'
       },
       {
         symbol: 'USDC',
         name: 'USD Coin',
-        balance: 250,
-        value: 250.00,
-        change24h: -0.2,
+        balance: 325,
+        value: 325.00,
+        change24h: 0.0,
         icon: '🪙'
       }
     ];

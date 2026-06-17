@@ -24,8 +24,8 @@ function Dashboard({ currentUser, navigateTo }) {
           <div className="stat-value stat-mono">{wallet ? wallet.address : "—"}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Chain</div>
-          <div className="stat-value">{wallet ? wallet.chain : "—"}</div>
+          <div className="stat-label">Network</div>
+          <div className="stat-value">{wallet ? (wallet.chain || 'Solana') : "—"}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Account</div>

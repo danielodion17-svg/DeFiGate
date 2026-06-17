@@ -113,7 +113,6 @@ export async function runOperationalHealthChecks(requestContext = {}) {
   }
 }
 
-export function startReconciliationJob(requestContext = {}) {
-  runOperationalHealthChecks(requestContext).catch((error) => console.error(error));
-  setInterval(() => runOperationalHealthChecks(requestContext), RECONCILIATION_INTERVAL_MS);
+export async function runReconciliationJob(requestContext = {}) {
+  await runOperationalHealthChecks(requestContext);
 }

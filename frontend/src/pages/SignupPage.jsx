@@ -69,12 +69,12 @@ const SignupPage = ({ onAuthenticated, onShowToast, onCancel }) => {
             <div className="signup-highlight">
               <h2>Secure account creation for your DeFi finance flow</h2>
               <p className="signup-copy">
-                Sign up with email and password today, then complete wallet setup later when you're ready.
+                Sign up with email and password. Your Solana wallet will be created automatically after account creation.
               </p>
               <ul className="signup-benefits">
                 <li>Simple signup with email and password</li>
-                <li>Wallet creation and finance tools are available after login</li>
-                <li>Built for fast, secure access to DeFiGate services</li>
+                <li>Solana wallet setup begins automatically after signup</li>
+                <li>Please wait a moment while we create your wallet</li>
               </ul>
             </div>
           </section>
@@ -109,8 +109,11 @@ const SignupPage = ({ onAuthenticated, onShowToast, onCancel }) => {
             </div>
 
             <button type="submit" className="btn btn-primary full-width" disabled={loading}>
-              {loading ? 'Signing up...' : 'Create account'}
+              {loading ? 'Creating account and wallet...' : 'Create account'}
             </button>
+            {loading && (
+              <p className="signup-loading-note">Please wait a moment while we create your Solana wallet.</p>
+            )}
 
             <div className="auth-page-footer signup-footer">
               <p>

@@ -6,7 +6,7 @@ const TransferPage = ({ user, onShowToast }) => {
   const [formData, setFormData] = useState({
     recipientAddress: '',
     amount: '',
-    network: 'sepolia',
+    network: 'solana',
   });
 
   const handleInputChange = (e) => {
@@ -54,7 +54,7 @@ const TransferPage = ({ user, onShowToast }) => {
       setFormData({
         recipientAddress: '',
         amount: '',
-        network: 'sepolia',
+        network: 'solana',
       });
     } catch (error) {
       console.error('Transfer error:', error);
@@ -83,16 +83,12 @@ const TransferPage = ({ user, onShowToast }) => {
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label htmlFor="network">Network</label>
-            <select
+            <input
               id="network"
-              name="network"
-              value={formData.network}
-              onChange={handleInputChange}
-            >
-              <option value="sepolia">Ethereum Sepolia</option>
-              <option value="mainnet">Ethereum Mainnet</option>
-              <option value="polygon">Polygon</option>
-            </select>
+              type="text"
+              value="Solana"
+              disabled
+            />
           </div>
 
           <div className="form-group">
@@ -103,7 +99,7 @@ const TransferPage = ({ user, onShowToast }) => {
               name="recipientAddress"
               value={formData.recipientAddress}
               onChange={handleInputChange}
-              placeholder="0x..."
+              placeholder="Enter Solana wallet address"
               required
             />
           </div>

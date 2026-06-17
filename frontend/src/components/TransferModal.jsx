@@ -7,7 +7,7 @@ function TransferModal({ isOpen, onClose, currentUser, balance, onTransfer }) {
     recipient: '',
     amount: '',
     token: 'USDC',
-    network: 'sepolia'
+    network: 'solana'
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -19,7 +19,7 @@ function TransferModal({ isOpen, onClose, currentUser, balance, onTransfer }) {
       recipient: '',
       amount: '',
       token: 'USDC',
-      network: 'sepolia'
+      network: 'solana'
     });
     setError('');
   };
@@ -150,7 +150,7 @@ function TransferModal({ isOpen, onClose, currentUser, balance, onTransfer }) {
                   name="recipient"
                   value={formData.recipient}
                   onChange={handleInputChange}
-                  placeholder={transferType === 'user' ? 'phone, email, or user ID' : '0x...'}
+                  placeholder={transferType === 'user' ? 'phone, email, or user ID' : 'Enter Solana wallet address'}
                   required
                 />
               </div>
@@ -183,11 +183,7 @@ function TransferModal({ isOpen, onClose, currentUser, balance, onTransfer }) {
               {transferType === 'wallet' && (
                 <div className="form-group">
                   <label>Network</label>
-                  <select name="network" value={formData.network} onChange={handleInputChange}>
-                    <option value="sepolia">Ethereum Sepolia</option>
-                    <option value="polygon">Polygon</option>
-                    <option value="mainnet">Ethereum Mainnet</option>
-                  </select>
+                  <div className="info-value">Solana</div>
                 </div>
               )}
 
@@ -218,7 +214,7 @@ function TransferModal({ isOpen, onClose, currentUser, balance, onTransfer }) {
                 {transferType === 'wallet' && (
                   <div className="detail-row">
                     <span>Network:</span>
-                    <span>{formData.network}</span>
+                    <span>Solana</span>
                   </div>
                 )}
                 <div className="detail-row total">

@@ -2,7 +2,7 @@ import bcrypt from "bcrypt";
 import crypto from "crypto";
 import pool from "../db.js";
 import { generateToken } from "../middleware/auth.js";
-import { getCanonicalWallet } from "../services/walletService.js";
+import { getCanonicalWallet, createPrivyWalletForUser } from "../services/walletService.js";
 import { sendVerificationEmail } from "../services/emailService.js";
 import { respondError, respondSuccess } from "../utils/response.js";
 import Transaction from "../models/Transaction.js";
@@ -67,13 +67,16 @@ export const signup = async (req, res) => {
 
     let wallet;
     try {
-      wallet = await getCanonicalWallet(user.id, preferredChain);
+      wallet = await createPrivyWalletForUser(user.id, preferredChain);
       if (!wallet) {
-        wallet = { status: "disconnected", error: "Wallet not found" };
+        wallet = await getCanonicalWallet(user.id, preferredChain);
       }
     } catch (err) {
-      console.error("DB signup wallet error", err?.message || err);
-      wallet = { status: "disconnected", error: err?.message || "Wallet lookup failed" };
+      console.error("signup wallet creation failed", err?.message || err);
+      wallet = await getCanonicalWallet(user.id, preferredChain);
+      if (!wallet) {
+        wallet = { status: "disconnected", error: err?.message || "Wallet creation failed" };
+      }
     }
 
     const token = generateToken(user);

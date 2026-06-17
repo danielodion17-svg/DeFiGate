@@ -104,7 +104,7 @@ const WalletPage = ({ user, onShowToast }) => {
         <div className="user-status" style={{ marginBottom: '24px', marginTop: '24px' }}>
           <div className="status-item">
             <span className="status-label">Network</span>
-            <span className="status-value">Ethereum Sepolia</span>
+            <span className="status-value">Solana</span>
           </div>
           <div className="status-item">
             <span className="status-label">Status</span>

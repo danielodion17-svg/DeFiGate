@@ -293,20 +293,9 @@ async function withRetry(fn, attempts = 3, delayMs = 3000) {
   throw lastError;
 }
 
-export function startBalanceSyncJob(requestContext = {}) {
-  const intervalMs = parseInt(process.env.BALANCE_SYNC_INTERVAL_MS || String(10 * 60 * 1000), 10);
-  const runSync = async () => {
+export async function runBalanceSyncJob() {
+  await withRetry(async () => {
     await syncAllUserWallets();
     await repairMissingDeposits();
-  };
-
-  withRetry(runSync).catch((error) => {
-    console.error('Initial balance sync failed:', error?.message || error);
   });
-
-  setInterval(() => {
-    withRetry(runSync).catch((error) => {
-      console.error('Background balance sync failed:', error?.message || error);
-    });
-  }, intervalMs);
 }

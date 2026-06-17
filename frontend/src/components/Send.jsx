@@ -17,7 +17,7 @@ function Send({ currentUser, sendTokens }) {
     <div className="view active" id="view-send">
       <div className="page-header">
         <h1>Send Tokens</h1>
-        <p className="subtitle">Transfer tokens to any address on supported chains</p>
+        <p className="subtitle">Transfer tokens to any address on Solana</p>
       </div>
       <div className="card">
         <form onSubmit={handleSend}>

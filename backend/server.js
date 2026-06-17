@@ -19,8 +19,9 @@ import transferRoutes from "./routes/transfer.js";
 import testRoutes from "./routes/test.js";
 import adminRoutes from "./routes/admin.js";
 import { requestContext } from "./middleware/requestContext.js";
-import { startReconciliationJob } from "./services/reconciliationJob.js";
-import { startBalanceSyncJob } from "./services/balanceSyncService.js";
+import { runReconciliationJob } from "./services/reconciliationJob.js";
+import { runBalanceSyncJob } from "./services/balanceSyncService.js";
+import scheduler from "./worker/scheduler.js";
 import { runStartupValidation } from "./scripts/startupValidation.js";
 
 const app = express();
@@ -134,9 +135,25 @@ const PORT = process.env.PORT || 5000;
       console.log('ℹ️ Sequelize sync skipped. Set SEQUELIZE_SYNC=true to enable model synchronization.');
     }
 
-    await import("./services/depositDetector.js");
-    startReconciliationJob({ requestId: `startup-${Date.now()}` });
-    startBalanceSyncJob({ requestId: `startup-${Date.now()}` });
+    const { runDepositDetectionJob } = await import("./services/depositDetector.js");
+
+    scheduler.registerJob(
+      'deposit_detection',
+      parseInt(process.env.DEPOSIT_DETECTOR_INTERVAL_MS || String(30 * 1000), 10),
+      async () => runDepositDetectionJob()
+    );
+    scheduler.registerJob(
+      'balance_sync',
+      parseInt(process.env.BALANCE_SYNC_INTERVAL_MS || String(10 * 60 * 1000), 10),
+      async () => runBalanceSyncJob()
+    );
+    scheduler.registerJob(
+      'reconciliation',
+      parseInt(process.env.RECONCILIATION_INTERVAL_MS || String(5 * 60 * 1000), 10),
+      async () => runReconciliationJob({ requestId: `scheduled-${Date.now()}` })
+    );
+
+    await scheduler.start();
 
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 API running on port ${PORT}`);
