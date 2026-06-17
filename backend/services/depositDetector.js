@@ -1,4 +1,5 @@
-import { PublicKey } from '@solana/web3.js';
+import pkg from '@solana/web3.js';
+const { PublicKey } = pkg;
 import { getAllCanonicalWallets } from '../services/walletService.js';
 import { processDeposit } from '../services/depositService.js';
 import { getSignaturesForAddress, getTransaction } from './solanaRpcClient.js';

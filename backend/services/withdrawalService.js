@@ -1,12 +1,14 @@
-import { PublicKey, Transaction as SolanaTransaction } from '@solana/web3.js';
-import {
+import pkg from '@solana/web3.js';
+const { PublicKey, Transaction: SolanaTransaction } = pkg;
+import splTokenPkg from '@solana/spl-token';
+const {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
   getAccount,
   transferChecked,
   TOKEN_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
-} from '@solana/spl-token';
+} = splTokenPkg;
 import axios from 'axios';
 import dotenv from 'dotenv';
 import { Op } from 'sequelize';

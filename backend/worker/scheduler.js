@@ -20,6 +20,11 @@ function scheduleNextTick() {
   const nextRun = Array.from(jobs.values())
     .filter((job) => !job.stopped)
     .reduce((next, job) => Math.min(next, job.nextRun), Infinity);
+
+  if (nextRun === Infinity) {
+    return;
+  }
+
   const delay = Math.max(100, nextRun - now());
   timer = setTimeout(() => {
     timer = null;
@@ -75,6 +80,52 @@ async function executeJob(job) {
       job.nextRun = now() + job.intervalMs;
     }
   }
+}
+
+export function getJobStatus(name) {
+  const job = jobs.get(name);
+  if (!job) return null;
+  return {
+    name: job.name,
+    intervalMs: job.intervalMs,
+    stopped: job.stopped,
+    locked: job.locked,
+    retryCount: job.retryCount,
+    lastRunAt: job.lastRunAt,
+    lastSuccessAt: job.lastSuccessAt,
+    lastError: job.lastError ? String(job.lastError.message || job.lastError) : null,
+    nextRun: job.nextRun,
+  };
+}
+
+export function getJobStatuses() {
+  return Array.from(jobs.values()).map((job) => getJobStatus(job.name));
+}
+
+export function isRunning() {
+  return running;
+}
+
+export function stopJob(name) {
+  const job = jobs.get(name);
+  if (!job) {
+    throw new Error(`Job not registered: ${name}`);
+  }
+  job.stopped = true;
+  return job;
+}
+
+export function resumeJob(name) {
+  const job = jobs.get(name);
+  if (!job) {
+    throw new Error(`Job not registered: ${name}`);
+  }
+  job.stopped = false;
+  if (job.nextRun <= now()) {
+    job.nextRun = now() + job.intervalMs;
+  }
+  scheduleNextTick();
+  return job;
 }
 
 export function registerJob(name, intervalMs, handler) {
@@ -139,4 +190,8 @@ export default {
   start,
   stop,
   runOnce,
+  getJobStatus,
+  getJobStatuses,
+  stopJob,
+  resumeJob,
 };

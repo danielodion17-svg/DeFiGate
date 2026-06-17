@@ -23,6 +23,9 @@ export const AUDIT_ACTIONS = {
   SOLANA_RPC_FAILURE: 'solana_rpc_failure',
   SOLANA_RPC_RATE_LIMIT: 'solana_rpc_rate_limit',
   GAS_WALLET_CREATED: 'gas_wallet_created',
+  WALLET_DEV_CREATED: 'wallet_dev_created',
+  WALLET_RETRY: 'wallet_retry',
+  WALLET_RETRY_FAILED: 'wallet_retry_failed',
 };
 
 /**

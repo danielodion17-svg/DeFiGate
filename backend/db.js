@@ -3,10 +3,11 @@ dotenv.config();
 
 import pkg from "pg";
 const { Pool } = pkg;
+import { getDatabaseUrl } from "./config/dbResolver.js";
 
-const connectionString = process.env.SUPABASE_DATABASE_URL || process.env.DATABASE_URL || process.env.LOCAL_DATABASE_URL;
+const connectionString = getDatabaseUrl();
 if (!connectionString) {
-  throw new Error("SUPABASE_DATABASE_URL, DATABASE_URL or LOCAL_DATABASE_URL must be defined in environment variables.");
+  throw new Error("Missing DATABASE_URL configuration. Please set DATABASE_URL, SUPABASE_DATABASE_URL, or LOCAL_DATABASE_URL.");
 }
 
 const useSsl = !connectionString.includes("localhost") && !connectionString.includes("127.0.0.1");

@@ -1,4 +1,5 @@
-import { Keypair, PublicKey, SystemProgram, Transaction } from '@solana/web3.js';
+import pkg from '@solana/web3.js';
+const { Keypair, PublicKey, SystemProgram, Transaction } = pkg;
 import { getBalance, getLatestBlockhash, getFeeForMessage, sendRawTransaction, confirmTransaction } from './solanaRpcClient.js';
 import { SystemGasWallet } from '../models/index.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';

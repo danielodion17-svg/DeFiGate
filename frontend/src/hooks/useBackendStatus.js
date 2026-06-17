@@ -5,23 +5,23 @@ export function useBackendStatus() {
   const [backendStatus, setBackendStatus] = useState('checking'); // 'online', 'offline', 'checking'
 
   useEffect(() => {
+    let isCancelled = false;
     const checkBackendStatus = async () => {
       try {
         const response = await fetch(apiUrl('/health'));
-        if (response.ok) {
-          setBackendStatus('online');
-        } else {
-          setBackendStatus('offline');
-        }
+        if (isCancelled) return;
+        setBackendStatus(response.ok ? 'online' : 'offline');
       } catch (error) {
+        if (isCancelled) return;
         setBackendStatus('offline');
       }
     };
 
     checkBackendStatus();
-    const interval = setInterval(checkBackendStatus, 30000); // Check every 30 seconds
 
-    return () => clearInterval(interval);
+    return () => {
+      isCancelled = true;
+    };
   }, []);
 
   return backendStatus;

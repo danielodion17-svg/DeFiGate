@@ -1,4 +1,5 @@
-import { PublicKey } from '@solana/web3.js';
+import pkg from '@solana/web3.js';
+const { PublicKey } = pkg;
 import { Op } from 'sequelize';
 import {
   sequelize,

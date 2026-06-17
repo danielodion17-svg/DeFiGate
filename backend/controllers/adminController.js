@@ -19,6 +19,7 @@ import { sequelize } from '../models/index.js';
 import { adjustAccount } from '../services/balanceService.js';
 import { logAuditEvent, AUDIT_ACTIONS, getAuditLogs } from '../services/auditService.js';
 import { getSystemGasWalletStatus } from '../services/gasWalletService.js';
+import scheduler from '../worker/scheduler.js';
 import { respondError, respondSuccess } from '../utils/response.js';
 import { Op } from 'sequelize';
 
@@ -211,6 +212,121 @@ export const adjustUserBalance = async (req, res) => {
   } catch (error) {
     console.error('Balance adjustment error:', error);
     respondError(res, 500, 'Balance adjustment failed', true, error.message);
+  }
+};
+
+export const getJobsStatus = async (req, res) => {
+  try {
+    const jobs = scheduler.getJobStatuses();
+    respondSuccess(res, { jobs });
+  } catch (error) {
+    console.error('Get jobs status error:', error);
+    respondError(res, 500, 'Failed to fetch job status', true, error.message);
+  }
+};
+
+export const runJobOnce = async (req, res) => {
+  try {
+    const { jobName } = req.params;
+    if (!jobName) {
+      return respondError(res, 400, 'jobName is required');
+    }
+    await scheduler.runOnce(jobName);
+    await logAuditEvent(AUDIT_ACTIONS.ADMIN_ACTION, {
+      user_id: req.user?.id,
+      metadata: {
+        action: 'run_job_once',
+        job_name: jobName,
+      },
+      ip_address: req.ip,
+      user_agent: req.get('User-Agent'),
+    });
+    respondSuccess(res, { jobName, status: 'executed' });
+  } catch (error) {
+    console.error('Run job once error:', error);
+    respondError(res, 500, 'Failed to run job once', true, error.message);
+  }
+};
+
+export const stopJob = async (req, res) => {
+  try {
+    const { jobName } = req.params;
+    if (!jobName) {
+      return respondError(res, 400, 'jobName is required');
+    }
+    scheduler.stopJob(jobName);
+    await logAuditEvent(AUDIT_ACTIONS.ADMIN_ACTION, {
+      user_id: req.user?.id,
+      metadata: {
+        action: 'stop_job',
+        job_name: jobName,
+      },
+      ip_address: req.ip,
+      user_agent: req.get('User-Agent'),
+    });
+    respondSuccess(res, { jobName, status: 'stopped' });
+  } catch (error) {
+    console.error('Stop job error:', error);
+    respondError(res, 500, 'Failed to stop job', true, error.message);
+  }
+};
+
+export const startJob = async (req, res) => {
+  try {
+    const { jobName } = req.params;
+    if (!jobName) {
+      return respondError(res, 400, 'jobName is required');
+    }
+    scheduler.resumeJob(jobName);
+    await logAuditEvent(AUDIT_ACTIONS.ADMIN_ACTION, {
+      user_id: req.user?.id,
+      metadata: {
+        action: 'start_job',
+        job_name: jobName,
+      },
+      ip_address: req.ip,
+      user_agent: req.get('User-Agent'),
+    });
+    respondSuccess(res, { jobName, status: 'started' });
+  } catch (error) {
+    console.error('Start job error:', error);
+    respondError(res, 500, 'Failed to start job', true, error.message);
+  }
+};
+
+export const stopScheduler = async (req, res) => {
+  try {
+    await scheduler.stop();
+    await logAuditEvent(AUDIT_ACTIONS.ADMIN_ACTION, {
+      user_id: req.user?.id,
+      metadata: {
+        action: 'stop_scheduler',
+      },
+      ip_address: req.ip,
+      user_agent: req.get('User-Agent'),
+    });
+    respondSuccess(res, { status: 'scheduler_stopped' });
+  } catch (error) {
+    console.error('Stop scheduler error:', error);
+    respondError(res, 500, 'Failed to stop scheduler', true, error.message);
+  }
+};
+
+export const startScheduler = async (req, res) => {
+  try {
+    await scheduler.start();
+    await logAuditEvent(AUDIT_ACTIONS.ADMIN_ACTION, {
+      user_id: req.user?.id,
+      metadata: {
+        action: 'start_scheduler',
+      },
+      ip_address: req.ip,
+      user_agent: req.get('User-Agent'),
+    });
+    respondSuccess(res, { status: 'scheduler_started' });
+  } catch (error) {
+    console.error('Start scheduler error:', error);
+    respondError(res, 500, 'Failed to start scheduler', true, error.message);
   }
 };
 

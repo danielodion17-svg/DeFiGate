@@ -1,5 +1,6 @@
 // services/reconciliationService.js
-import { PublicKey } from '@solana/web3.js';
+import pkg from '@solana/web3.js';
+const { PublicKey } = pkg;
 import { sequelize, User, Account, Transaction, Wallet, AuditLog } from '../models/index.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 import { getCanonicalWallet, getCanonicalWalletByWalletId, getAllCanonicalWallets } from '../services/walletService.js';

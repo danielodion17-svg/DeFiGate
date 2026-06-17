@@ -1,4 +1,5 @@
-import { PublicKey } from '@solana/web3.js';
+import pkg from '@solana/web3.js';
+const { PublicKey } = pkg;
 import { User, Account, Wallet, Transaction } from '../models/index.js';
 import { getAppLedgerBalance } from './reconciliationService.js';
 import { getCanonicalWallet, getCanonicalWalletByWalletId, getAllCanonicalWallets } from '../services/walletService.js';

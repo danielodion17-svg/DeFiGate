@@ -18,26 +18,27 @@ import userRoutes from "./routes/user.js";
 import transferRoutes from "./routes/transfer.js";
 import testRoutes from "./routes/test.js";
 import adminRoutes from "./routes/admin.js";
+import healthRoutes from "./routes/health.js";
 import { requestContext } from "./middleware/requestContext.js";
 import { runReconciliationJob } from "./services/reconciliationJob.js";
 import { runBalanceSyncJob } from "./services/balanceSyncService.js";
 import scheduler from "./worker/scheduler.js";
 import { runStartupValidation } from "./scripts/startupValidation.js";
+import { retryMissingWallets } from "./services/walletRetryService.js";
+import { hasDatabaseUrl } from "./config/dbResolver.js";
 
 const app = express();
 
 // ======================
 // ENV CHECK
 // ======================
-const hasDatabaseUrl = Boolean(
-  process.env.SUPABASE_DATABASE_URL || process.env.DATABASE_URL || process.env.LOCAL_DATABASE_URL
-);
+const hasDatabaseConfig = hasDatabaseUrl();
 const hasSupabaseUrl = Boolean(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL);
 const hasSupabaseServiceKey = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-if (!hasDatabaseUrl && !hasSupabaseUrl) {
+if (!hasDatabaseConfig) {
   console.error(
-    "❌ Missing database configuration. Set SUPABASE_DATABASE_URL or DATABASE_URL (and optionally SUPABASE_URL with SUPABASE_SERVICE_ROLE_KEY for Supabase JS client access)."
+    "❌ Missing DATABASE_URL configuration. Set DATABASE_URL (or SUPABASE_DATABASE_URL or LOCAL_DATABASE_URL) before starting the backend."
   );
   process.exit(1);
 }
@@ -75,13 +76,7 @@ app.use("/api/admin", adminRoutes);
 // ======================
 // HEALTH CHECK
 // ======================
-app.get("/api/health", (req, res) => {
-  res.json({
-    ok: true,
-    service: "DeFiGate API",
-    timestamp: new Date().toISOString()
-  });
-});
+app.use("/api/health", healthRoutes);
 
 // ======================
 // GLOBAL ERROR HANDLER
@@ -151,6 +146,11 @@ const PORT = process.env.PORT || 5000;
       'reconciliation',
       parseInt(process.env.RECONCILIATION_INTERVAL_MS || String(5 * 60 * 1000), 10),
       async () => runReconciliationJob({ requestId: `scheduled-${Date.now()}` })
+    );
+    scheduler.registerJob(
+      'wallet_retry',
+      parseInt(process.env.WALLET_RETRY_INTERVAL_MS || String(5 * 60 * 1000), 10),
+      async () => retryMissingWallets()
     );
 
     await scheduler.start();

@@ -1,13 +1,15 @@
-import { Connection, PublicKey } from '@solana/web3.js';
+import pkg from '@solana/web3.js';
+const { Connection, PublicKey } = pkg;
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 
-const rawRpcUrls = (process.env.SOLANA_RPC_URLS || process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com')
+const DEFAULT_DEV_RPC = 'https://api.mainnet-beta.solana.com';
+const rawRpcUrls = (process.env.SOLANA_RPC_URLS || process.env.SOLANA_RPC_URL || (process.env.NODE_ENV === 'development' ? DEFAULT_DEV_RPC : ''))
   .split(',')
   .map((url) => url.trim())
   .filter(Boolean);
 
 if (rawRpcUrls.length === 0) {
-  throw new Error('No Solana RPC endpoints configured. Set SOLANA_RPC_URLS or SOLANA_RPC_URL.');
+  throw new Error('No Solana RPC endpoints configured. Set SOLANA_RPC_URLS or SOLANA_RPC_URL in production.');
 }
 
 const rpcUrls = Array.from(new Set(rawRpcUrls));
@@ -125,6 +127,17 @@ function isRetryableError(error) {
     'failed to fetch',
     'connection refused',
     'invalid json rpc response',
+  ].some((token) => message.includes(token));
+}
+
+function isRateLimitError(error) {
+  const message = String(error?.message || error || '').toLowerCase();
+  if (!message) return false;
+  return [
+    '429',
+    'rate limit',
+    'too many requests',
+    'rate-limited',
   ].some((token) => message.includes(token));
 }
 
@@ -272,6 +285,16 @@ export async function getLatestBlockhash(commitment = 'confirmed') {
 
 export async function getFeeForMessage(message) {
   return await requestRpc('getFeeForMessage', [message]);
+}
+
+export async function testRpcConnection() {
+  try {
+    await getLatestBlockhash('confirmed');
+    return true;
+  } catch (error) {
+    console.error('[solanaRpcClient] health check failed', error.message || error);
+    return false;
+  }
 }
 
 export async function sendRawTransaction(serializedTransaction, options = {}) {

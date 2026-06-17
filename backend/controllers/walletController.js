@@ -1,12 +1,8 @@
 import axios from "axios";
 import dotenv from "dotenv";
 import { supabase as supabaseDefault, supabaseAnonClient, supabaseServiceClient, requireServiceClient } from "../config/supabase.js";
-import {
-  PublicKey,
-  Transaction,
-  SystemProgram,
-  LAMPORTS_PER_SOL,
-} from "@solana/web3.js";
+import pkg from "@solana/web3.js";
+const { PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } = pkg;
 import { logAuditEvent, AUDIT_ACTIONS } from "../services/auditService.js";
 import { getAppLedgerBalance } from "../services/reconciliationService.js";
 import { syncWalletBalances } from "../services/balanceSyncService.js";
@@ -17,14 +13,15 @@ import {
   createPrivyWalletForUser,
   syncPrivyWallet,
 } from "../services/walletService.js";
-import {
+import splTokenPkg from "@solana/spl-token";
+const {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
   getAccount,
   transferChecked,
   TOKEN_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
-} from "@solana/spl-token";
+} = splTokenPkg;
 import { getRpcConnection } from "../services/solanaRpcClient.js";
 dotenv.config();
 
@@ -75,11 +72,7 @@ export const createEmbeddedWallet = async (req, res) => {
       return res.json({ ok: true, data: existing });
     }
 
-    if (!isPrivyEnabled) {
-        return res.status(503).json({ ok: false, error: 'Privy wallet creation is disabled or missing credentials' });
-      }
-
-      const wallet = await createPrivyWalletForUser(userId, chainType);
+    const wallet = await createPrivyWalletForUser(userId, chainType);
     if (!wallet) {
       return res.status(500).json({ ok: false, error: 'Failed to create wallet' });
     }

@@ -1,10 +1,27 @@
 import axios from 'axios';
+import crypto from 'crypto';
+import pkg from '@solana/web3.js';
+const { Keypair } = pkg;
 import { Wallet } from '../models/index.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 
 const PRIVY_APP_ID = process.env.PRIVY_APP_ID;
 const PRIVY_APP_SECRET = process.env.PRIVY_APP_SECRET;
 const PRIVY_BASE = 'https://api.privy.io';
+const DEV_WALLET_PROVIDER = 'dev';
+
+function isDevMode() {
+  return process.env.NODE_ENV === 'development';
+}
+
+function createLocalDevWalletPayload() {
+  const keypair = Keypair.generate();
+  return {
+    id: `dev-${Date.now()}-${keypair.publicKey.toBase58()}`,
+    address: keypair.publicKey.toBase58(),
+    chain_type: 'solana',
+  };
+}
 
 function normalizeChain(chainType = 'solana') {
   return String(chainType || 'solana').trim().toLowerCase();
@@ -37,8 +54,9 @@ export async function warnIfDuplicateWallets(userId) {
 export async function getCanonicalWallet(userId, chainType = 'solana') {
   if (!userId) return null;
   const chain = normalizeChain(chainType);
+  const providers = ['privy', DEV_WALLET_PROVIDER];
   const wallet = await Wallet.findOne({
-    where: { user_id: userId, chain, provider: 'privy', is_archived: false },
+    where: { user_id: userId, chain, provider: providers, is_archived: false },
     order: [['is_primary', 'DESC'], ['created_at', 'ASC']],
   });
   if (wallet) {
@@ -53,7 +71,8 @@ export async function resolveWallet(address, chainType = 'solana') {
     throw new Error('MISSING_WALLET_ADDRESS');
   }
   const chain = normalizeChain(chainType);
-  const wallet = await Wallet.findOne({ where: { address: normalizedAddress, chain, provider: 'privy', is_archived: false } });
+  const providers = ['privy', DEV_WALLET_PROVIDER];
+  const wallet = await Wallet.findOne({ where: { address: normalizedAddress, chain, provider: providers, is_archived: false } });
   return wallet;
 }
 
@@ -92,14 +111,15 @@ export async function getOrCreateWallet(userId, chainType = 'solana', walletData
   }
 
   const provider = String(walletData.provider || '').trim().toLowerCase();
-  if (provider !== 'privy') {
-    throw new Error('ONLY_PRIVY_WALLET_CREATION_ALLOWED');
+  const allowedProviders = ['privy', DEV_WALLET_PROVIDER];
+  if (!allowedProviders.includes(provider)) {
+    throw new Error('ONLY_PRIVY_OR_DEV_WALLET_CREATION_ALLOWED');
   }
 
   const providerWalletId = walletData.provider_wallet_id || walletData.id || null;
   const address = validateAddress(walletData.address || walletData.accounts?.[0]?.address || '');
   if (!providerWalletId || !address) {
-    throw new Error('MISSING_PRIVY_WALLET_DATA');
+    throw new Error('MISSING_WALLET_DATA');
   }
 
   const walletPayload = {
@@ -146,6 +166,28 @@ export async function createPrivyWalletForUser(userId, chainType = 'solana') {
       },
     });
     return existingWallet;
+  }
+
+  if (!PRIVY_APP_ID || !PRIVY_APP_SECRET) {
+    if (isDevMode()) {
+      const devWallet = createLocalDevWalletPayload();
+      await logAuditEvent(AUDIT_ACTIONS.WALLET_DEV_CREATED, {
+        user_id: userId,
+        wallet_id: devWallet.id,
+        metadata: {
+          provider: DEV_WALLET_PROVIDER,
+          wallet_address: devWallet.address,
+          chain,
+        },
+        severity: 'warning',
+      });
+      return await getOrCreateWallet(userId, chain, {
+        provider: DEV_WALLET_PROVIDER,
+        provider_wallet_id: devWallet.id,
+        address: devWallet.address,
+      });
+    }
+    throw new Error('Privy credentials are not configured');
   }
 
   const privyWallet = await createPrivyWallet(chain);
