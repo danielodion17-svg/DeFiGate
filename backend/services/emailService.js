@@ -1,7 +1,6 @@
-import dotenv from "dotenv";
-dotenv.config();
+import { Secrets } from "../config/secrets.js";
 
-const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+const FRONTEND_URL = Secrets.FRONTEND_URL || "http://localhost:5173";
 
 export const sendVerificationEmail = async (email, token) => {
   const url = `${FRONTEND_URL}/verify-email?token=${token}`;

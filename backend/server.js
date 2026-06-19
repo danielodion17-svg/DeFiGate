@@ -1,8 +1,6 @@
-import dotenv from "dotenv";
+import { Secrets } from "./config/secrets.js";
 import path from "path";
 import { fileURLToPath } from "url";
-
-dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,8 +31,8 @@ const app = express();
 // ENV CHECK
 // ======================
 const hasDatabaseConfig = hasDatabaseUrl();
-const hasSupabaseUrl = Boolean(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL);
-const hasSupabaseServiceKey = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
+const hasSupabaseUrl = Boolean(Secrets.SUPABASE_URL);
+const hasSupabaseServiceKey = Boolean(Secrets.SUPABASE_SERVICE_ROLE_KEY);
 
 if (!hasDatabaseConfig) {
   console.error(
@@ -49,7 +47,7 @@ if (hasSupabaseUrl && !hasSupabaseServiceKey) {
   );
 }
 
-if (process.env.NODE_ENV === 'production' && !hasSupabaseServiceKey) {
+if (Secrets.NODE_ENV === 'production' && !hasSupabaseServiceKey) {
   console.warn(
     '⚠️ Running in production without SUPABASE_SERVICE_ROLE_KEY. Service-role protected Supabase operations will fail at runtime with controlled errors.'
   );
@@ -92,7 +90,7 @@ app.use((err, req, res, next) => {
 // ======================
 // START SERVER
 // ======================
-const PORT = process.env.PORT || 5000;
+const PORT = Secrets.PORT;
 
 (async () => {
   try {
@@ -109,7 +107,7 @@ const PORT = process.env.PORT || 5000;
       }
     }
 
-    const shouldAutoRunMigrations = process.env.AUTO_RUN_MIGRATIONS !== 'false' && process.env.NODE_ENV !== 'production';
+    const shouldAutoRunMigrations = Secrets.AUTO_RUN_MIGRATIONS && Secrets.NODE_ENV !== 'production';
     if (shouldAutoRunMigrations) {
       console.log('🛠️ AUTO_RUN_MIGRATIONS enabled by default in development. Applying database migrations');
       const { default: runMigrations } = await import('./scripts/runMigrations.js');
@@ -121,8 +119,8 @@ const PORT = process.env.PORT || 5000;
       console.log('ℹ️ Skipping database migrations on startup. Set AUTO_RUN_MIGRATIONS=true to enable.');
     }
 
-    if (process.env.SEQUELIZE_SYNC === 'true') {
-      const syncOptions = { alter: process.env.NODE_ENV !== 'production' };
+    if (Secrets.SEQUELIZE_SYNC) {
+      const syncOptions = { alter: Secrets.NODE_ENV !== 'production' };
       console.log(`🛠️ Sequelize sync mode: alter=${syncOptions.alter}`);
       await sequelize.sync(syncOptions);
       console.log('✅ Models synced');
@@ -134,22 +132,22 @@ const PORT = process.env.PORT || 5000;
 
     scheduler.registerJob(
       'deposit_detection',
-      parseInt(process.env.DEPOSIT_DETECTOR_INTERVAL_MS || String(30 * 1000), 10),
+      Secrets.DEPOSIT_DETECTOR_INTERVAL_MS,
       async () => runDepositDetectionJob()
     );
     scheduler.registerJob(
       'balance_sync',
-      parseInt(process.env.BALANCE_SYNC_INTERVAL_MS || String(10 * 60 * 1000), 10),
+      Secrets.BALANCE_SYNC_INTERVAL_MS,
       async () => runBalanceSyncJob()
     );
     scheduler.registerJob(
       'reconciliation',
-      parseInt(process.env.RECONCILIATION_INTERVAL_MS || String(5 * 60 * 1000), 10),
+      Secrets.RECONCILIATION_INTERVAL_MS,
       async () => runReconciliationJob({ requestId: `scheduled-${Date.now()}` })
     );
     scheduler.registerJob(
       'wallet_retry',
-      parseInt(process.env.WALLET_RETRY_INTERVAL_MS || String(5 * 60 * 1000), 10),
+      Secrets.WALLET_RETRY_INTERVAL_MS,
       async () => retryMissingWallets()
     );
 

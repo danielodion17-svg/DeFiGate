@@ -1,11 +1,10 @@
 import axios from "axios";
 import crypto from "crypto";
-import dotenv from "dotenv";
-dotenv.config();
+import { Secrets } from "../config/secrets.js";
 
-const KOTANI_BASE = process.env.KOTANI_API_BASE; // https://sandbox-api.kotanipay.io/api/v3
-const KOTANI_KEY = process.env.KOTANI_API_KEY;
-const KOTANI_WEBHOOK_SECRET = process.env.KOTANI_WEBHOOK_SECRET;
+const KOTANI_BASE = Secrets.KOTANI_API_BASE; // https://sandbox-api.kotanipay.io/api/v3
+const KOTANI_KEY = Secrets.KOTANI_API_KEY;
+const KOTANI_WEBHOOK_SECRET = Secrets.KOTANI_WEBHOOK_SECRET;
 
 function kotaniHeaders() {
   return {
@@ -30,8 +29,7 @@ export const createOnramp = async (req, res) => {
       amount: amountNGN,
       currency,
       channel,
-      callback_url:
-        process.env.FRONTEND_URL + "/ramp-complete",
+      callback_url: Secrets.FRONTEND_URL + "/ramp-complete",
       metadata: { product: "DeFiGate", userId },
     };
 

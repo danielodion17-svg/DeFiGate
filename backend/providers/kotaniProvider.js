@@ -1,9 +1,8 @@
 import axios from "axios";
-import dotenv from "dotenv";
-dotenv.config();
+import { Secrets } from "../config/secrets.js";
 
-const KOTANI_BASE = process.env.KOTANI_API_BASE || "https://sandbox-api.kotanipay.io/api/v3";
-const KOTANI_KEY = process.env.KOTANI_API_KEY;
+const KOTANI_BASE = Secrets.KOTANI_API_BASE || "https://sandbox-api.kotanipay.io/api/v3";
+const KOTANI_KEY = Secrets.KOTANI_API_KEY;
 
 function kotaniHeaders() {
   return {
@@ -81,7 +80,7 @@ const KotaniProvider = {
 
   verifyWebhook(req) {
     const signature = req.headers["x-kotani-signature"];
-    const secret = process.env.KOTANI_WEBHOOK_SECRET;
+    const secret = Secrets.KOTANI_WEBHOOK_SECRET;
     if (!secret) return true;
 
     const payload = JSON.stringify(req.body);

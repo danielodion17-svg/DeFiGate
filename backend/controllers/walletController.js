@@ -1,5 +1,5 @@
 import axios from "axios";
-import dotenv from "dotenv";
+import { Secrets } from "../config/secrets.js";
 import { supabase as supabaseDefault, supabaseAnonClient, supabaseServiceClient, requireServiceClient } from "../config/supabase.js";
 import pkg from "@solana/web3.js";
 const { PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } = pkg;
@@ -23,10 +23,8 @@ const {
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } = splTokenPkg;
 import { getRpcConnection } from "../services/solanaRpcClient.js";
-dotenv.config();
-
-const PRIVY_APP_ID = process.env.PRIVY_APP_ID;
-const PRIVY_APP_SECRET = process.env.PRIVY_APP_SECRET;
+const PRIVY_APP_ID = Secrets.PRIVY_APP_ID;
+const PRIVY_APP_SECRET = Secrets.PRIVY_APP_SECRET;
 const PRIVY_BASE = "https://api.privy.io";
 
 const inMemoryWallets = new Map();

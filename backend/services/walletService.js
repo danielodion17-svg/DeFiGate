@@ -1,17 +1,18 @@
 import axios from 'axios';
 import crypto from 'crypto';
 import pkg from '@solana/web3.js';
+import { Secrets } from '../config/secrets.js';
 const { Keypair } = pkg;
 import { Wallet } from '../models/index.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 
-const PRIVY_APP_ID = process.env.PRIVY_APP_ID;
-const PRIVY_APP_SECRET = process.env.PRIVY_APP_SECRET;
+const PRIVY_APP_ID = Secrets.PRIVY_APP_ID;
+const PRIVY_APP_SECRET = Secrets.PRIVY_APP_SECRET;
 const PRIVY_BASE = 'https://api.privy.io';
 const DEV_WALLET_PROVIDER = 'dev';
 
 function isDevMode() {
-  return process.env.NODE_ENV === 'development';
+  return Secrets.IS_DEVELOPMENT;
 }
 
 function createLocalDevWalletPayload() {
@@ -169,7 +170,7 @@ export async function createPrivyWalletForUser(userId, chainType = 'solana') {
   }
 
   if (!PRIVY_APP_ID || !PRIVY_APP_SECRET) {
-    if (isDevMode()) {
+    if (Secrets.IS_DEVELOPMENT) {
       const devWallet = createLocalDevWalletPayload();
       await logAuditEvent(AUDIT_ACTIONS.WALLET_DEV_CREATED, {
         user_id: userId,

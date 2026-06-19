@@ -1,5 +1,6 @@
 // services/reconciliationService.js
 import pkg from '@solana/web3.js';
+import { Secrets } from '../config/secrets.js';
 const PublicKey = pkg?.PublicKey || pkg?.default?.PublicKey || pkg;
 import { sequelize, User, Account, Transaction, Wallet, AuditLog } from '../models/index.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
@@ -321,7 +322,7 @@ export async function autoRepairSafeMismatches() {
           if (!userAccount) throw new Error('User account not found');
 
           const systemUser = await User.findOne({
-            where: { email: process.env.SYSTEM_USER_EMAIL || SYSTEM_USER_EMAIL },
+            where: { email: Secrets.SYSTEM_USER_EMAIL },
             transaction,
           });
 

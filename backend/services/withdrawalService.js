@@ -10,7 +10,7 @@ const {
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } = splTokenPkg;
 import axios from 'axios';
-import dotenv from 'dotenv';
+import { Secrets } from '../config/secrets.js';
 import { Op } from 'sequelize';
 import { sequelize, Transaction, Account, Wallet } from '../models/index.js';
 import { creditAccount, reserveFunds, releaseFunds, commitReservedFunds } from '../services/balanceService.js';
@@ -18,10 +18,8 @@ import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 import { getTransaction, getLatestBlockhash } from './solanaRpcClient.js';
 import { ensureMinimumGasBalance } from './gasWalletService.js';
 
-dotenv.config();
-
-const PRIVY_APP_ID = process.env.PRIVY_APP_ID;
-const PRIVY_APP_SECRET = process.env.PRIVY_APP_SECRET;
+const PRIVY_APP_ID = Secrets.PRIVY_APP_ID;
+const PRIVY_APP_SECRET = Secrets.PRIVY_APP_SECRET;
 const PRIVY_BASE = 'https://api.privy.io';
 const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
 const USDC_DECIMALS = 6;

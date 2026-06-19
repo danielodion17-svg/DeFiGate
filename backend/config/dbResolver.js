@@ -1,10 +1,7 @@
+import { Secrets } from './secrets.js';
+
 export function getDatabaseUrl() {
-  return (
-    process.env.DATABASE_URL ||
-    process.env.SUPABASE_DATABASE_URL ||
-    process.env.LOCAL_DATABASE_URL ||
-    ''
-  );
+  return Secrets.DATABASE_URL || '';
 }
 
 export function hasDatabaseUrl() {

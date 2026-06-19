@@ -1,4 +1,5 @@
 import pkg from '@solana/web3.js';
+import { Secrets } from '../config/secrets.js';
 const { PublicKey } = pkg;
 import { User, Account, Wallet, Transaction } from '../models/index.js';
 import { getAppLedgerBalance } from './reconciliationService.js';
@@ -15,7 +16,7 @@ import {
 
 const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
 const LAMPORTS_PER_SOL = 1_000_000_000;
-const DEFAULT_SIGNATURE_LOOKBACK = parseInt(process.env.BALANCE_SYNC_SIGNATURE_LIMIT || '50', 10);
+const DEFAULT_SIGNATURE_LOOKBACK = Secrets.BALANCE_SYNC_SIGNATURE_LIMIT;
 
 async function getOnchainSolBalance(walletAddress) {
   try {

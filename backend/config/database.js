@@ -1,12 +1,13 @@
 import { Sequelize } from "sequelize";
 import { getDatabaseUrl } from "./dbResolver.js";
+import { Secrets } from "./secrets.js";
 
 const databaseUrl = getDatabaseUrl();
 
 const useSsl = !databaseUrl.includes("localhost") && !databaseUrl.includes("127.0.0.1");
 const sequelize = new Sequelize(databaseUrl, {
   dialect: "postgres",
-  logging: process.env.NODE_ENV === "development" ? console.log : false,
+  logging: Secrets.NODE_ENV === "development" ? console.log : false,
   pool: {
     max: 5,
     min: 0,

@@ -6,7 +6,9 @@ const providers = {
   partner: PartnerProvider,
 };
 
-const providerName = process.env.RAMP_PROVIDER?.toLowerCase() || "kotani";
+import { Secrets } from "../config/secrets.js";
+
+const providerName = Secrets.RAMP_PROVIDER?.toLowerCase() || "kotani";
 const selectedProvider = providers[providerName] || KotaniProvider;
 
 export default selectedProvider;

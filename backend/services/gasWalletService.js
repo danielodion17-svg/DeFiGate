@@ -1,16 +1,17 @@
 import pkg from '@solana/web3.js';
 const { Keypair, PublicKey, SystemProgram, Transaction } = pkg;
+import { Secrets } from '../config/secrets.js';
 import { getBalance, getLatestBlockhash, getFeeForMessage, sendRawTransaction, confirmTransaction } from './solanaRpcClient.js';
 import { SystemGasWallet } from '../models/index.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 
-const DEFAULT_GAS_THRESHOLD = Number(process.env.SOLANA_GAS_THRESHOLD || '0.01');
-const REFILL_AMOUNT_SOL = Number(process.env.SOLANA_GAS_REFILL_AMOUNT_SOL || '0.05');
-const AUTO_REFILL_ENABLED = process.env.SOLANA_GAS_AUTO_REFILL === 'true';
-const GAS_WALLET_ADDRESS = process.env.SYSTEM_GAS_WALLET_ADDRESS;
-const GAS_WALLET_ENCRYPTED_KEY = process.env.SYSTEM_GAS_WALLET_ENCRYPTED_KEY;
-const TREASURY_PRIVATE_KEY = process.env.SOLANA_GAS_TREASURY_PRIVATE_KEY;
-const TREASURY_ADDRESS = process.env.SOLANA_GAS_TREASURY_ADDRESS;
+const DEFAULT_GAS_THRESHOLD = Secrets.SOLANA_GAS_THRESHOLD;
+const REFILL_AMOUNT_SOL = Secrets.SOLANA_GAS_REFILL_AMOUNT_SOL;
+const AUTO_REFILL_ENABLED = Secrets.SOLANA_GAS_AUTO_REFILL;
+const GAS_WALLET_ADDRESS = Secrets.SYSTEM_GAS_WALLET_ADDRESS;
+const GAS_WALLET_ENCRYPTED_KEY = Secrets.SYSTEM_GAS_WALLET_ENCRYPTED_KEY;
+const TREASURY_PRIVATE_KEY = Secrets.SOLANA_GAS_TREASURY_PRIVATE_KEY;
+const TREASURY_ADDRESS = Secrets.SOLANA_GAS_TREASURY_ADDRESS;
 
 function parseSecretKey(secret) {
   if (!secret) return null;
@@ -113,7 +114,7 @@ export async function estimateTransactionFee() {
       },
       severity: 'warning',
     });
-    return Number(process.env.SOLANA_GAS_FALLBACK_FEE_SOL || '0.000005');
+    return Secrets.SOLANA_GAS_FALLBACK_FEE_SOL;
   }
 }
 

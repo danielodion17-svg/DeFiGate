@@ -4,12 +4,11 @@
  */
 
 import { sequelize } from '../models/index.js';
-
-const REQUIRED_ENV_VARS = [];
+import { Secrets } from '../config/secrets.js';
 
 const OPTIONAL_ENV_VARS_WITH_DEFAULTS = {
-  'NODE_ENV': 'development',
-  'PORT': '5000',
+  NODE_ENV: 'development',
+  PORT: '5000',
 };
 // Note: Do NOT default SOLANA RPC to a public endpoint. Require SOLANA_RPC_URLS or SOLANA_RPC_URL to be set in production.
 
@@ -17,29 +16,20 @@ const OPTIONAL_ENV_VARS_WITH_DEFAULTS = {
  * Validate required environment variables
  */
 export function validateEnvironmentVariables() {
-  const missing = [];
-  
-  for (const envVar of REQUIRED_ENV_VARS) {
-    if (!process.env[envVar]) {
-      missing.push(envVar);
-    }
-  }
-  
-  if (missing.length > 0) {
-    const msg = `❌ Missing required environment variables: ${missing.join(', ')}`;
+  Secrets.validateRequiredEnvironment();
+
+  if (!Secrets.DATABASE_URL && Secrets.NODE_ENV !== 'development') {
+    const msg = '❌ Missing DATABASE_URL or SUPABASE_DATABASE_URL or LOCAL_DATABASE_URL in non-development mode.';
     console.error(msg);
     throw new Error(msg);
   }
 
-  if (process.env.NODE_ENV !== 'development') {
-    const dbUrl = process.env.DATABASE_URL || process.env.SUPABASE_DATABASE_URL;
-    if (!dbUrl) {
-      const msg = '❌ Missing DATABASE_URL or SUPABASE_DATABASE_URL in non-development mode.';
-      console.error(msg);
-      throw new Error(msg);
-    }
+  if (!Secrets.SOLANA_RPC_URLS && Secrets.NODE_ENV !== 'development') {
+    const msg = '❌ Missing SOLANA_RPC_URLS or SOLANA_RPC_URL in non-development mode.';
+    console.error(msg);
+    throw new Error(msg);
   }
-  
+
   console.log('✅ Environment validation completed');
 }
 
@@ -138,16 +128,16 @@ export async function validateDatabaseSchema() {
 export function validateServiceConfiguration() {
   const warnings = [];
 
-  if (!process.env.PRIVY_APP_ID || !process.env.PRIVY_APP_SECRET) {
-    if (process.env.NODE_ENV === 'development') {
+  if (!Secrets.PRIVY_APP_ID || !Secrets.PRIVY_APP_SECRET) {
+    if (Secrets.NODE_ENV === 'development') {
       warnings.push('⚠️  Privy credentials not configured; wallet creation will use local dev fallback.');
     } else {
       warnings.push('⚠️  Privy credentials not configured; wallet creation will fail at runtime');
     }
   }
 
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    if (process.env.NODE_ENV === 'development') {
+  if (!Secrets.SUPABASE_SERVICE_ROLE_KEY) {
+    if (Secrets.NODE_ENV === 'development') {
       warnings.push('⚠️  Supabase service role key missing; admin operations will be disabled in development.');
     } else {
       warnings.push('⚠️  Supabase service role key missing; admin operations will fail at runtime');
@@ -155,7 +145,7 @@ export function validateServiceConfiguration() {
   }
 
   for (const [key, defaultValue] of Object.entries(OPTIONAL_ENV_VARS_WITH_DEFAULTS)) {
-    if (!process.env[key]) {
+    if (!Secrets[key]) {
       console.log(`ℹ️  ${key} not set; using default: ${defaultValue}`);
     }
   }

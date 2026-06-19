@@ -1,23 +1,21 @@
 import pkg from '@solana/web3.js';
+import { Secrets } from '../config/secrets.js';
 const { Connection, PublicKey } = pkg;
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 
 const DEFAULT_DEV_RPC = 'https://api.mainnet-beta.solana.com';
-const rawRpcUrls = (process.env.SOLANA_RPC_URLS || process.env.SOLANA_RPC_URL || (process.env.NODE_ENV === 'development' ? DEFAULT_DEV_RPC : ''))
-  .split(',')
-  .map((url) => url.trim())
-  .filter(Boolean);
+const rawRpcUrls = Secrets.getSolanaRpcUrls();
+const rpcUrls = Array.from(new Set(rawRpcUrls));
 
-if (rawRpcUrls.length === 0) {
+if (rpcUrls.length === 0) {
   throw new Error('No Solana RPC endpoints configured. Set SOLANA_RPC_URLS or SOLANA_RPC_URL in production.');
 }
 
-const rpcUrls = Array.from(new Set(rawRpcUrls));
 const connections = new Map();
-const cacheTtlMs = Number(process.env.SOLANA_RPC_CACHE_TTL_MS || '7000');
-const maxConcurrentRequests = Number(process.env.SOLANA_RPC_CONCURRENCY_LIMIT || '8');
-const maxRetryCycles = Number(process.env.SOLANA_RPC_MAX_RETRY_CYCLES || '2');
-const requestTimeoutMs = Number(process.env.SOLANA_RPC_REQUEST_TIMEOUT_MS || '20000');
+const cacheTtlMs = Secrets.SOLANA_RPC_CACHE_TTL_MS;
+const maxConcurrentRequests = Secrets.SOLANA_RPC_CONCURRENCY_LIMIT;
+const maxRetryCycles = Secrets.SOLANA_RPC_MAX_RETRY_CYCLES;
+const requestTimeoutMs = Secrets.SOLANA_RPC_REQUEST_TIMEOUT_MS;
 
 const pendingRequests = new Map();
 const cacheResults = new Map();

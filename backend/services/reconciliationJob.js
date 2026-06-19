@@ -1,12 +1,13 @@
 import { Op } from 'sequelize';
+import { Secrets } from '../config/secrets.js';
 import { Wallet, Transaction } from '../models/index.js';
 import { getAllCanonicalWallets } from '../services/walletService.js';
 import { runReconciliation, autoRepairSafeMismatches } from './reconciliationService.js';
 import { logAuditEvent, AUDIT_ACTIONS } from './auditService.js';
 import { getBalance } from './solanaRpcClient.js';
 
-const RECONCILIATION_INTERVAL_MS = parseInt(process.env.RECONCILIATION_INTERVAL_MS || String(5 * 60 * 1000), 10);
-const SOL_GAS_THRESHOLD = parseFloat(process.env.SOL_GAS_THRESHOLD || '0.15');
+const RECONCILIATION_INTERVAL_MS = Secrets.RECONCILIATION_INTERVAL_MS;
+const SOL_GAS_THRESHOLD = Secrets.SOL_GAS_THRESHOLD;
 const SOLANA_DECIMALS = 9;
 
 async function checkSolGasBalances() {
@@ -40,7 +41,7 @@ async function checkSolGasBalances() {
 }
 
 async function checkFailedWithdrawalBroadcasts() {
-  const thresholdMinutes = parseInt(process.env.WITHDRAWAL_BROADCAST_ALERT_THRESHOLD_MINUTES || '30', 10);
+  const thresholdMinutes = Secrets.WITHDRAWAL_BROADCAST_ALERT_THRESHOLD_MINUTES;
   const result = await Transaction.findAll({
     where: {
       type: 'withdrawal',
